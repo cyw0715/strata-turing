@@ -25,6 +25,7 @@ __device__ __forceinline__ float silu_(float x) { return x / (1.0f + __expf(-x))
 #include "moe_w.cuh"
 #include "moe_mma.cuh"
 #include "moe_mma_iq.cuh"
+#include "cuda/native_mma.cuh"
 
 template <int TYPE>
 void mma_launch(const MoeW& w, const BigJob* jobs, const int* njobs, int njobs_cap, const __half* x, float* out, cudaStream_t s) {
@@ -48,6 +49,9 @@ void moe_mma(const DW& A, size_t sa, const BigJob* jobs, const int* njobs, int n
         case T_IQ3_S: mma_launch<T_IQ3_S>(w, jobs, njobs, njobs_cap, x, out, s); break;
         case T_IQ3_XXS: mma_launch<T_IQ3_XXS>(w, jobs, njobs, njobs_cap, x, out, s); break;
         case T_IQ2_S: mma_launch<T_IQ2_S>(w, jobs, njobs, njobs_cap, x, out, s); break;
+        case T_IQ2_XXS: mma_launch<T_IQ2_XXS>(w, jobs, njobs, njobs_cap, x, out, s); break;
+        case T_IQ2_XS: mma_launch<T_IQ2_XS>(w, jobs, njobs, njobs_cap, x, out, s); break;
+        case T_Q2_0: mma_launch<T_Q2_0>(w, jobs, njobs, njobs_cap, x, out, s); break;
         default: throw std::runtime_error("moe_mma: expert type " + std::to_string(A.type) + " not handled");
     }
     ck_launch("moe_mma");

@@ -103,6 +103,11 @@ template <> struct qtraits<T_IQ4_NL>  { static constexpr int qk = QK4_NL; static
 template <> struct qtraits<T_IQ4_XS>  { static constexpr int qk = QK_K;   static constexpr int qi = QI4_XS; };
 template <> struct qtraits<T_IQ3_S>   { static constexpr int qk = QK_K;   static constexpr int qi = QI3_S; };
 template <> struct qtraits<T_IQ3_XXS> { static constexpr int qk = QK_K;   static constexpr int qi = QI3_XXS; };
+template <> struct qtraits<T_IQ2_XXS> { static constexpr int qk = QK_K; static constexpr int qi = QI2_XXS; };
+template <> struct qtraits<T_IQ2_XS> { static constexpr int qk = QK_K; static constexpr int qi = QI2_XS; };
+// Decode visits a Q2_0 block as two 32-value units; vdot maps them back to the
+// physical 64-value block. This also fits the down kernel's 32-value units.
+template <> struct qtraits<T_Q2_0> { static constexpr int qk = 32; static constexpr int qi = 1; };
 template <> struct qtraits<T_IQ2_S>   { static constexpr int qk = QK_K;   static constexpr int qi = QI2_S; };
 
 // VDR = vec dot ratio: contiguous ints one thread handles per call in the decode (MMVQ) kernels

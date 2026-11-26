@@ -13,6 +13,7 @@
 #   STRATA_SPLIT_CARDS   card counts to build, e.g. "2;3" (default "2": 3 and 4 cards have not been run with the host exchange)
 #   STRATA_SPLIT_ARCH    the one compute capability the kernels are built for (default: the first number in CMAKE_CUDA_ARCHITECTURES, else 86);
 #                        the engine refuses a card of any other architecture
+option(STRATA_SPLIT_CUDA_PEER "Experimental CUDA peer/NCCL transport for strata-split" OFF)
 set(STRATA_SPLIT_CARDS "2" CACHE STRING "card counts strata-split is built for (2, 3, 4)")
 set(STRATA_SPLIT_ARCH "" CACHE STRING "compute capability strata-split is built for (e.g. 86)")
 set(STRATA_SPLIT_PF_JOB "64" CACHE STRING "rows of one expert per prompt-path job: 64 (default) or 128")
@@ -77,6 +78,9 @@ set(_sp ${CMAKE_CURRENT_SOURCE_DIR})
 set(_sp_engine
     ${_sp}/src/gguf.cpp ${_sp}/src/model.cpp ${_sp}/src/store.cpp ${_sp}/src/moe_mma.cu ${_sp}/src/engine.cu
     ${_sp}/src/engine_common.cu ${_sp}/src/prefill.cu ${_sp}/src/session.cpp ${_sp}/src/batch.cpp ${_sp}/tools/sfnx.cpp)
+if(STRATA_SPLIT_CUDA_PEER AND NOT _fnx_hip AND STRATA_SPLIT_ARCH STREQUAL "75")
+  list(APPEND _sp_engine ${_sp}/src/cuda/dense_sm75.cu ${_sp}/src/cuda/moe_down_sm75.cu ${_sp}/src/cuda/moe_gu_sm75.cu ${_sp}/src/cuda/phase_cache.cu ${_sp}/src/cuda/hc_staged.cu ${_sp}/src/cuda/dense_rows_sm75.cu ${_sp}/src/cuda/dense_subwarp_sm75.cu ${_sp}/src/cuda/moe_gu_native_lut_sm75.cu ${_sp}/src/cuda/dense_tuned_sm75.cu ${_sp}/src/cuda/attn_warps_sm75.cu ${_sp}/src/cuda/hc_mma_sm75.cu ${_sp}/src/cuda/phase_cache_fast.cu ${_sp}/src/cuda/attn_mma_sm75.cu ${_sp}/src/cuda/attn_mma_check.cu ${_sp}/src/cuda/moe_gu_sub8_sm75.cu ${_sp}/src/cuda/moe_gu_sub_check.cu ${_sp}/src/cuda/topk_parallel_sm75.cu ${_sp}/src/cuda/moe_gu_pair8_sm75.cu)
+endif()
 if(_fnx_hip)
   list(APPEND _sp_engine ${_sp}/src/selftest.cu)   # the kernel self-test of a card Strata has not run the split on (hip/selftest_policy.hpp)
 endif()
@@ -136,6 +140,9 @@ foreach(_n ${STRATA_SPLIT_CARDS})
     continue()
   endif()
   target_include_directories(${_t} PRIVATE ${_sp}/src ${_sp}/tools ${_sp_quant})
+  if(STRATA_SPLIT_CUDA_PEER)
+    target_compile_definitions(${_t} PRIVATE FNX_CUDA_PEER=1)
+  endif()
   target_compile_definitions(${_t} PRIVATE FNX_NCARD=${_n} FNX_ARCH=${STRATA_SPLIT_ARCH} FNX_27B=0 FNX_HOSTRING=1 FNX_PF_JOB=${STRATA_SPLIT_PF_JOB}
                              FNX_DIR="${_sp}")
   target_compile_options(${_t} PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--use_fast_math --expt-relaxed-constexpr -Wno-deprecated-gpu-targets>)

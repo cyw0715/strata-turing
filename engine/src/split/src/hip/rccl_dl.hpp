@@ -40,7 +40,12 @@ inline bool rccl_load(RcclApi& api, const std::string& path, std::string& why) {
     return false;
 #else
     const char* over = std::getenv("FNX_RCCL_LIB");
-    const std::string lib = over && *over ? over : (path.empty() ? "librccl.so.1" : path);
+    #if FNX_CUDA_PEER
+    const char* default_lib = "libnccl.so.2";
+#else
+    const char* default_lib = "librccl.so.1";
+#endif
+    const std::string lib = over && *over ? over : (path.empty() ? default_lib : path);
     api.handle = dlopen(lib.c_str(), RTLD_NOW | RTLD_LOCAL);
     if (!api.handle) {
         const char* e = dlerror();

@@ -47,6 +47,8 @@
 #include "../src/session.hpp"
 #include "sfnx_input.hpp"
 
+namespace fnx { void adapt_static_hot(Model&, const std::vector<unsigned>&); }
+
 namespace {
 
 using sfnx::Input;
@@ -106,6 +108,7 @@ Args parse_args(int argc, char** argv) {
     }
     if (!serve) throw std::runtime_error("sfnx runs as --serve");
     if (const char* e = std::getenv("FNX_DRAFT"); e && e[0]) a.draft = e;
+    if (const char* e = std::getenv("FNX_DRAFT_MODEL"); e && e[0]) a.draft_model = e;
     if (a.draft != "mtp" && a.draft != "dflash2") throw std::runtime_error("--draft takes mtp or dflash2");
     if (a.draft == "dflash2") {
         if (a.gguf.empty() || a.draft_model.empty() || (a.draft_vocab.empty() && a.mtp_dir.empty()))
@@ -113,6 +116,9 @@ Args parse_args(int argc, char** argv) {
         if (a.draft_vocab.empty()) a.draft_vocab = a.mtp_dir + "/draft_vocab.bin";
     } else if (a.gguf.empty() || a.mtp_dir.empty()) throw std::runtime_error("--native and --mtp are required");
     if (a.batch < 1 || a.batch > MAX_SLOTS) throw std::runtime_error("--batch must be 1.." + std::to_string(MAX_SLOTS));
+    if (fnx::env_int("FNX_STATIC_ADAPT",0) &&
+        (a.batch != 1 || !fnx::env_int("FNX_ROUTE_COUNT",0) || !fnx::env_int("FNX_STATIC_EXPERTS",0)))
+        throw std::runtime_error("FNX_STATIC_ADAPT requires --batch 1, FNX_ROUTE_COUNT=1 and FNX_STATIC_EXPERTS=1");
     fnx::rope_scale();   // a bad scale stops here, not after the minute of loading (the context's limit needs the model)
     return a;
 }
@@ -456,6 +462,7 @@ struct Server {
         if (a.batch > 1 && fnx::batch_drafts() != fnx::BatchDrafts::off)
             dec = std::make_unique<fnx::BatchDecoder>(e, a.K, a.lookup, EOS, fnx::batch_drafts());
         e.warm_graphs();
+        if (fnx::env_int("FNX_STATIC_ADAPT",0)) route_baseline = e.route_counts();
     }
 
     // the slot's lane and session, made on first use (lane 0 is slot 0's from the start, but lanes move between
@@ -530,6 +537,7 @@ struct Server {
     // (check_route_env makes sure of the paths at start). A file that cannot be written ends that measurement, said on
     // stderr, and the engine serves on
     size_t traced = 0;
+    std::vector<unsigned> route_baseline; // warm-up routes must not train the hot set
     bool trace_failed = false, count_failed = false;
     // v to path (fopen mode `mode`); false with errno set when any step fails
     static bool write_u32s(const char* path, const char* mode, const std::vector<unsigned>& v) {
@@ -542,6 +550,11 @@ struct Server {
         return wrote;
     }
     void save_routes() {
+#if FNX_CUDA_PEER && !FNX_27B
+        e.prefill_cache_decode(false);
+        e.print_expert_cache_stats();
+#endif
+        e.print_ple_stats();
         if (!trace_failed)
             if (const std::vector<unsigned> t = e.route_trace(traced); !t.empty()) {
                 const char* tpath = std::getenv("FNX_ROUTE_TRACE_FILE");
@@ -554,8 +567,13 @@ struct Server {
                 }
             }
         if (count_failed) return;
-        const std::vector<unsigned> v = e.route_counts();
+        std::vector<unsigned> v = e.route_counts();
         if (v.empty()) return;
+        if (!route_baseline.empty()) {
+            if (route_baseline.size() != v.size()) throw std::runtime_error("route baseline shape");
+            for (size_t i = 0; i < v.size(); ++i) v[i] -= route_baseline[i];
+        }
+        fnx::adapt_static_hot(m,v);
         const char* path = std::getenv("FNX_ROUTE_FILE");
         const std::string tmp = std::string(path) + ".tmp";
         if (!write_u32s(tmp.c_str(), "wb", v) || std::rename(tmp.c_str(), path) != 0) {
@@ -864,6 +882,11 @@ struct Server {
                      slot, st.prompt_tokens, st.reused, st.prompt_tokens - st.reused, st.prompt_ms, st.generated, st.decode_ms,
                      st.generated * 1000.0 / std::max(1.0, st.decode_ms), st.drafts_accepted, st.drafts_offered, st.rounds, st.lookup_rounds,
                      st.decode_ms / std::max(1, st.rounds));
+        if (fnx::env_int("FNX_DECODE_STATS", 0))
+            std::fprintf(stderr, "sfnx: decode breakdown: verify %.1f ms (GPU %.1f, launch %.1f), draft %.1f ms "
+                                 "(GPU %.1f, %d calls), commit %.1f ms, session %.1f ms\n",
+                         st.verify_ms, st.verify_gpu_ms, st.launch_ms, st.draft_ms, st.draft_gpu_ms, st.draft_calls,
+                         st.commit_ms, st.decode_ms - st.verify_ms - st.draft_ms - st.commit_ms);
         slots[(size_t) slot].idle_since = std::chrono::steady_clock::now();
         save_routes();
     }

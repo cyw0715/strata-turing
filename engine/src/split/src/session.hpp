@@ -3,6 +3,7 @@
 #pragma once
 
 #include <atomic>
+#include <array>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -11,6 +12,7 @@
 #include <vector>
 
 #include "engine.hpp"
+#include "proposal_calibration.hpp"
 
 namespace fnx {
 
@@ -136,6 +138,7 @@ private:
     void checkpoint(Conv& c);
     std::vector<int> prompt_;   // the prompt being answered (its last token not yet in the engine)
     GenStats* timing_ = nullptr;   // generate()'s stats while it runs
+    std::array<ProposalCalibration,MAXT> proposal_calibration_; // per session and draft depth; opt-in only
     bool is_eos(int t) const;
     std::vector<int> lookup(const std::vector<int>& ctx, int d1) const;
 };

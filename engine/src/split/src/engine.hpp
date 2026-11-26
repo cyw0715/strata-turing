@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -14,6 +15,7 @@
 #include "df2_bridge.hpp"
 #include "kernels.hpp"
 #include "model.hpp"
+#include "strata/ngram/ple_reader.hpp"
 
 namespace fnx {
 
@@ -44,6 +46,7 @@ public:
     // lanes: how many add_lane() blocks the K/V pool has room for on top of max_ctx positions
     explicit Engine(Model& m, int max_ctx = 4096, int lanes = 1);
     ~Engine();
+    void print_ple_stats() const;
     // tokens at positions pos()..pos()+T-1; returns the greedy next token after each row; advances pos()
     std::vector<int> window(const std::vector<int>& tokens);
     // the same without advancing: a speculative window (the last token, then drafts). commit(n) keeps its first n rows
@@ -68,6 +71,11 @@ public:
     // logits); the caller puts the prompt's last token through a window for its next token. With the draft layer
     // attached it reads the rows too, each paired with the token after it (`after`: the one after the last row)
     void prefill(const std::vector<int>& tokens, int after = -1);
+#if FNX_CUDA_PEER && !FNX_27B
+    // Lend idle prompt staging buffers to cold experts between prompt reads (opt-in, one lane).
+    void prefill_cache_decode(bool enable);
+    void print_expert_cache_stats();
+#endif
     std::function<void(int)> on_prefill_chunk;   // after each chunk of prefill(): the rows read so far
     // at most `rows` prompt rows to a pass (0: the engine's own, FNX_PF_PASS chunks). The server asks for 8192 while other requests decode: they run a window between
     // two passes, so a pass is how long they wait
@@ -154,7 +162,13 @@ public:
     int lane() const { return cur_; }
     int lanes() const { return (int) lanes_.size(); }
     // pages a lane can still take: the free ones, and with FNX_ARENA the ones the experts' slots can still lend
-    int free_pages() const { return (int) free_pages_.size() + (arena_cap_ - arena_w_); }
+    int free_pages() const {
+        int n = (int) free_pages_.size() + (arena_cap_ - arena_w_);
+#if FNX_CUDA_PEER && !FNX_27B
+        n += (int) prompt_cache_pages_.size();
+#endif
+        return n;
+    }
     // when set: called when lane `lane` needs `pages` more pages than the pool has free (after any arena lend), before
     // the call is refused, to free them by parking other lanes (it may switch lanes, but must leave the current lane
     // current, its state untouched). Not called again from inside itself, nor while a window is uncommitted (lanes
@@ -237,6 +251,9 @@ public:
 
 private:
     Model& m_;
+    mutable std::unique_ptr<strata::ngram::PleReader> ple_reader_;
+    mutable std::mutex ple_reader_mutex_;
+    mutable bool ple_reader_checked_ = false;
     int max_ctx_, pos_ = 0;
     // the rotary's constants, YaRN's included when scaled, set at construction (before any graph capture: they ride
     // into the graphs as kernel arguments). rope_of hands a kernel them with that call's M-RoPE table
@@ -271,6 +288,9 @@ private:
     std::vector<LaneHost> lanes_;
     int cur_ = 0;
     std::vector<int> free_pages_;
+#if FNX_CUDA_PEER && !FNX_27B
+    std::vector<int> prompt_cache_pages_; // idle K/V pages held by the opt-in decode cache
+#endif
     bool in_pool_short_ = false;   // on_pool_short is running
     // FNX_ARENA: pages [0, arena_base_) are the K/V pool's own, [arena_base_, arena_w_) borrowed from the arena pool's
     // slots (the coldest first), up to arena_cap_ (the pool keeps 2 MAXT TOPK slots on every card); all 0 without one
@@ -390,6 +410,11 @@ private:
     // allocated once that is final (Engine::Engine, after the arena's sizing has placed any more of them in RAM)
     size_t pf_stage_bytes(int c) const;
     void prefill_stages();
+#if FNX_CUDA_PEER && !FNX_27B
+    unsigned long long* expert_cache_stats_[NCARD] = {};
+    void* phase_cache_state_[NCARD] = {};
+    void prefill_cache_dynamic(bool enable);
+#endif
     // a pass: up to PF_PASS chunks, each layer over all of them before the next layer (with an ExpertCache the layer's
     // experts not in a slot are copied into VRAM once per pass); a chunk's rows are embedded in its pinned set already.
     // `between` runs on the host while the cards work

@@ -16,6 +16,9 @@
 #include <vector>
 
 #include "gguf.hpp"
+#if FNX_CUDA_PEER
+#include "strata/quant/dequant.hpp"
+#endif
 
 namespace fnx {
 namespace conv {
@@ -224,6 +227,11 @@ inline void dequantize(uint32_t type, const uint8_t* src, size_t n, float* y) {
         }
         return;
     }
+#if FNX_CUDA_PEER
+    // Mixed IQ3_XXS also uses IQ formats for some small/dense tensors. Reuse
+    // the main engine's scalar reader instead of maintaining another copy.
+    if (strata::quant::dequant_row(static_cast<strata::quant::Type>(type), src, y, (int64_t) n)) return;
+#endif
     throw std::runtime_error("tensor_convert: no reader for ggml type " + std::to_string(type));
 }
 

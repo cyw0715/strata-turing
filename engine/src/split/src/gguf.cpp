@@ -19,6 +19,7 @@
 #include <chrono>
 #include <exception>
 #include <mutex>
+#include <memory>
 #include <thread>
 #include <cstdio>
 #include <cstdlib>
@@ -50,6 +51,8 @@ TypeInfo type_info(uint32_t t) {
         case T_IQ3_XXS: return {256, 98};
         case T_IQ3_S: return {256, 110};
         case T_IQ2_S: return {256, 82};
+        case T_IQ2_XXS: return {256, 66};
+        case T_IQ2_XS: return {256, 74};
         case T_IQ4_XS: return {256, 136};
         case T_Q2_0: return {64, 18};
     }
@@ -136,10 +139,52 @@ Gguf::Gguf(const std::string& first) {
 // embeddings and projections in K-quants, IQ4_XS and BF16, which the engine does not read. Those are dequantized and written
 // again as Q8_0 (F32 for the small ones), once, here; the routed experts are left as they are. A file without such experts
 // (UD-Q4_K_XL, Q8_0) is not touched at all: the check below is the only difference for it.
+#ifndef _WIN32
+namespace {
+struct ConvertedSpill {
+    void* data = nullptr;
+    size_t size = 0;
+    ~ConvertedSpill() {
+        if (data) munmap(data, size);
+    }
+};
+using ConvertedSpills = std::vector<std::unique_ptr<ConvertedSpill>>;
+std::mutex converted_spill_mutex;
+std::map<const Gguf*, ConvertedSpills> converted_spill_owners;
+
+std::unique_ptr<ConvertedSpill> spill_converted_bytes(const std::string& dir, const std::vector<uint8_t>& bytes) {
+    std::string path = dir + "/converted-XXXXXX";
+    std::vector<char> name(path.begin(), path.end());
+    name.push_back(0);
+    struct Fd {
+        int value;
+        ~Fd() {
+            if (value >= 0) close(value);
+        }
+    } fd{mkstemp(name.data())};
+    if (fd.value < 0) throw std::runtime_error("converted spill: mkstemp: " + std::string(std::strerror(errno)));
+    if (unlink(name.data()) != 0) throw std::runtime_error("converted spill: unlink: " + std::string(std::strerror(errno)));
+    for (size_t off = 0; off < bytes.size();) {
+        const ssize_t n = write(fd.value, bytes.data() + off, bytes.size() - off);
+        if (n < 0 && errno == EINTR) continue;
+        if (n <= 0) throw std::runtime_error("converted spill: write: " + std::string(std::strerror(errno)));
+        off += (size_t) n;
+    }
+    auto map = std::make_unique<ConvertedSpill>();
+    void* p = mmap(nullptr, bytes.size(), PROT_READ, MAP_PRIVATE, fd.value, 0);
+    if (p == MAP_FAILED) throw std::runtime_error("converted spill: mmap: " + std::string(std::strerror(errno)));
+    map->data = p;
+    map->size = bytes.size();
+    if (std::memcmp(p, bytes.data(), bytes.size())) throw std::runtime_error("converted spill: byte comparison failed");
+    return map;
+}
+}
+#endif
+
 void Gguf::convert_small_tensors() {
     bool mixed = false;
     for (const auto& kv : tensors_)
-        mixed |= kv.second.type == T_IQ2_S || kv.second.type == T_IQ3_XXS || kv.second.type == T_IQ3_S || kv.second.type == T_Q2_0;
+        mixed |= kv.second.type == T_IQ2_XXS || kv.second.type == T_IQ2_XS || kv.second.type == T_IQ2_S || kv.second.type == T_IQ3_XXS || kv.second.type == T_IQ3_S || kv.second.type == T_Q2_0;
     iq_experts_ = mixed;
     if (!mixed) return;
     // #5800: every tensor is converted on its own (its own input, its own output vector), so the conversions run on several threads: one thread took 62 s of
@@ -154,7 +199,7 @@ void Gguf::convert_small_tensors() {
     std::vector<Job> jobs;
     for (auto& kv : tensors_) {
         Tensor& t = kv.second;
-        if (t.type == T_Q2_0) {   // the routed down experts of some layers: the same values as Q4_0 blocks
+        if (t.type == T_Q2_0 && !FNX_CUDA_PEER) {   // the routed down experts of some layers: the same values as Q4_0 blocks
             owned_.emplace_back();
             jobs.push_back({&t, 0, true, &owned_.back()});
             continue;
@@ -165,6 +210,13 @@ void Gguf::convert_small_tensors() {
         jobs.push_back({&t, want, false, &owned_.back()});
     }
     const int n_threads = convert_threads((int) jobs.size());
+    const char* spill_env = std::getenv("FNX_CONVERT_SPILL_DIR");
+    const std::string spill_dir = spill_env ? spill_env : "";
+#ifdef _WIN32
+    if (!spill_dir.empty()) throw std::runtime_error("FNX_CONVERT_SPILL_DIR currently needs Linux");
+#else
+    ConvertedSpills spills(jobs.size());
+#endif
     std::atomic<size_t> next{0};
     std::exception_ptr failed;
     std::mutex failed_mu;
@@ -176,6 +228,13 @@ void Gguf::convert_small_tensors() {
                 const Job& j = jobs[i];
                 if (j.repack) conv::repack_q2_0_to_q4_0(*j.t, *j.out);
                 else conv::convert(*j.t, j.want, *j.out);
+#ifndef _WIN32
+                if (!spill_dir.empty() && !j.repack && j.t->name != "token_embd.weight" && j.out->size() >= (1u << 20)) {
+                    spills[i] = spill_converted_bytes(spill_dir, *j.out);
+                    j.t->data = (const uint8_t*) spills[i]->data;
+                    std::vector<uint8_t>().swap(*j.out);
+                }
+#endif
             } catch (...) {
                 std::lock_guard<std::mutex> lk(failed_mu);
                 if (!failed) failed = std::current_exception();
@@ -192,11 +251,26 @@ void Gguf::convert_small_tensors() {
         for (std::thread& th : pool) th.join();
     }
     if (failed) std::rethrow_exception(failed);
+#ifndef _WIN32
+    if (!spill_dir.empty()) {
+        size_t bytes = 0, count = 0;
+        for (const auto& map : spills) if (map) bytes += map->size, ++count;
+        std::lock_guard<std::mutex> lock(converted_spill_mutex);
+        converted_spill_owners[this] = std::move(spills);
+        std::fprintf(stderr, "gguf: %zu converted tensors, %zu MiB, in reclaimable disk mappings; all byte comparisons passed\n", count, bytes >> 20);
+    }
+#endif
     converted_ = (int) jobs.size();
     std::fprintf(stderr, "gguf: %d dense/small tensors converted to Q8_0/F32 at load (the file's routed experts keep their types)\n", converted_);
 }
 
 Gguf::~Gguf() {
+#ifndef _WIN32
+    {
+        std::lock_guard<std::mutex> lock(converted_spill_mutex);
+        converted_spill_owners.erase(this);
+    }
+#endif
     for (Map& mp : maps_) {
 #ifdef _WIN32
         if (mp.base) UnmapViewOfFile(mp.base);

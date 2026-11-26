@@ -3,6 +3,10 @@
 // sequential pieces by a Stager first.
 #pragma once
 
+#ifndef FNX_CUDA_PEER
+#define FNX_CUDA_PEER 0
+#endif
+
 #ifndef FNX_27B
 #error "FNX_27B is unset: build through the Makefile (make FNX_MODEL=fnx or 27b)"
 #endif
@@ -22,7 +26,7 @@ namespace fnx {
 
 enum GgmlType : uint32_t {
     T_F32 = 0, T_F16 = 1, T_Q4_0 = 2, T_Q4_1 = 3, T_Q5_0 = 6, T_Q5_1 = 7, T_Q8_0 = 8, T_Q8_1 = 9, T_Q2_K = 10,
-    T_Q3_K = 11, T_Q4_K = 12, T_Q5_K = 13, T_Q6_K = 14, T_Q8_K = 15, T_IQ3_XXS = 18, T_IQ4_NL = 20, T_IQ3_S = 21, T_IQ2_S = 22,
+    T_Q3_K = 11, T_Q4_K = 12, T_Q5_K = 13, T_Q6_K = 14, T_Q8_K = 15, T_IQ2_XXS = 16, T_IQ2_XS = 17, T_IQ3_XXS = 18, T_IQ4_NL = 20, T_IQ3_S = 21, T_IQ2_S = 22,
     T_IQ4_XS = 23, T_BF16 = 30, T_Q2_0 = 42,   // 42: Strata's 64-value 2-bit blocks (not in llama.cpp)
 };
 

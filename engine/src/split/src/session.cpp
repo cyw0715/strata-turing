@@ -1,5 +1,6 @@
 #include "session.hpp"
 #include "env.hpp"
+#include "proposal_power.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -409,12 +410,30 @@ Finish Session::generate(int max_new, const Sampling& s, const std::function<voi
     // model's: the verify accepts a draft with min(1, p / q) and otherwise draws from max(0, p - q)
     const bool pen_drafts = penalize && env_int("FNX_DRAFT_PEN", 1) != 0;
     const bool samp_drafts = sample && env_int("FNX_DRAFT_SAMPLE", 1) != 0;
+    const double proposal_power=env_num("FNX_DRAFT_Q_POWER",1.0);
+    if(!std::isfinite(proposal_power) || proposal_power<0.25 || proposal_power>4.0)
+        throw std::runtime_error("draft proposal power must be in [0.25,4]");
+    const bool proposal_stats=env_int("FNX_DRAFT_Q_STATS",0)!=0;
+    const double probes[6]={0.5,0.75,1.0,1.25,1.5,2.0};
+    double overlap[6]={};size_t overlap_count=0;
+    const int calibration_mode=env_int("FNX_DRAFT_CALIBRATE",0); // 0 off, 1 held-out overlap only, 2 apply
+    const double calibration_rate=env_num("FNX_DRAFT_CALIBRATE_RATE",0.2);
+    if(calibration_mode<0 || calibration_mode>2 || !std::isfinite(calibration_rate) || calibration_rate<=0 || calibration_rate>1)
+        throw std::runtime_error("invalid draft calibration mode or rate");
+    const double strengths[5]={0.25,0.5,1.0,2.0,4.0};
+    double calibrated_overlap[5]={},base_overlap=0;size_t calibrated_count=0;
     // The MTP chain's length follows acceptance: per chain position, how often a draft that got there stood (decayed,
     // so it follows the text), and each round the length 1..K with the most tokens expected per ms. A round costs about
     // ROUND_MS, a verify row DRAFT_ROW_MS more and a draft call after d1 DRAFT_CALL_MS (Q4, lab, 2026-10-25, prose with
     // K fixed at 1 / 2 / 3 / 4: 12.47 / 14.76 / 16.60 / 18.34 ms a round). FNX_DRAFT_ADAPT=0: always K
     const bool adapt = env_int("FNX_DRAFT_ADAPT", 1) != 0;
-    constexpr double ROUND_MS = 11.2, DRAFT_ROW_MS = 1.3, DRAFT_CALL_MS = 0.65, DECAY = 0.97;
+    const double ROUND_MS = env_num("FNX_DRAFT_COST_ROUND_MS",11.2);
+    const double DRAFT_ROW_MS = env_num("FNX_DRAFT_COST_ROW_MS",1.3);
+    const double DRAFT_CALL_MS = env_num("FNX_DRAFT_COST_CALL_MS",0.65);
+    if (!std::isfinite(ROUND_MS) || ROUND_MS <= 0.0 || !std::isfinite(DRAFT_ROW_MS) || DRAFT_ROW_MS <= 0.0 ||
+        !std::isfinite(DRAFT_CALL_MS) || DRAFT_CALL_MS < 0.0)
+        throw std::runtime_error("draft cost model needs a positive round/row time and a nonnegative call time");
+    constexpr double DECAY = 0.97;
     std::vector<double> tried(MAXT, 1.0), stood(MAXT, 0.7);   // a prior of 70% at every position
     auto chain_len = [&](double call_ms) {
         int best = K_;
@@ -438,7 +457,7 @@ Finish Session::generate(int max_new, const Sampling& s, const std::function<voi
     int mtp_chains = 0;
     // one draft from the draft layer for the token after pen_seq (the penalty window before it)
     auto draft_one = [&](int T, bool from_main, int src_row, const std::vector<int>& toks, int pos0, const std::vector<int>& pen_seq,
-                         Dist& q) {
+                         Dist& q,int depth) {
         Engine::Penalties::Row pen;
         if (pen_drafts) pen = penalty_row(pen_seq, s);
         int d = e_.draft(T, from_main, src_row, toks, pos0, pen_drafts ? &pen : nullptr, samp_drafts);
@@ -446,6 +465,8 @@ Finish Session::generate(int max_new, const Sampling& s, const std::function<voi
         q = Dist{};
         if (samp_drafts) {
             q = make_dist(e_.last_draft_cands, s);
+            temper_proposal(q.p,proposal_power);
+            if(calibration_mode==2)proposal_calibration_[depth].transform(q.ids,q.p);
             d = draw(q, unif(rng));
         }
         return d;
@@ -506,6 +527,34 @@ Finish Session::generate(int max_new, const Sampling& s, const std::function<voi
                     const int dr = rows[n + 1];
                     const Dist& q = qs[(size_t) n];
                     const bool fixed = q.ids.empty();
+                    if(calibration_mode && !fixed) {
+                        auto& calibration=proposal_calibration_[n];
+                        if(calibration_mode==1 && n==0) {
+                            // Predict with past observations only, then train. No extra random draws.
+                            for(size_t j=0;j<q.ids.size();++j)base_overlap+=std::min(d.prob(q.ids[j]),q.p[j]);
+                            for(int probe=0;probe<5;++probe) {
+                                auto probabilities=q.p;calibration.transform(q.ids,probabilities,strengths[probe]);
+                                for(size_t j=0;j<q.ids.size();++j)
+                                    calibrated_overlap[probe]+=std::min(d.prob(q.ids[j]),probabilities[j]);
+                            }
+                            ++calibrated_count;
+                        }
+                        // q itself stays unchanged, including for the rejection/residual below.
+                        auto predicted=q.p;
+                        if(calibration_mode==1)calibration.transform(q.ids,predicted);
+                        calibration.observe(d.ids,d.p,q.ids,predicted,calibration_rate);
+                    }
+                    if(proposal_stats && !fixed && n==0) {
+                        // An exact overlap score, with no extra random draws.
+                        std::vector<double> target(q.ids.size());
+                        for(size_t j=0;j<q.ids.size();++j)target[j]=d.prob(q.ids[j]);
+                        for(int probe=0;probe<6;++probe) {
+                            auto probabilities=q.p;
+                            temper_proposal(probabilities,probes[probe]/proposal_power);
+                            for(size_t j=0;j<q.ids.size();++j)overlap[probe]+=std::min(target[j],probabilities[j]);
+                        }
+                        ++overlap_count;
+                    }
                     if (unif(rng) * (fixed ? 1.0 : q.prob(dr)) < d.prob(dr)) {
                         o[n] = dr;
                         continue;
@@ -593,7 +642,7 @@ Finish Session::generate(int max_new, const Sampling& s, const std::function<voi
             continue;
         }
         Dist q1;
-        const int d1 = draft_one(used, true, 0, std::vector<int>(o.begin(), o.begin() + used), p, pen_seq, q1);
+        const int d1 = draft_one(used, true, 0, std::vector<int>(o.begin(), o.begin() + used), p, pen_seq, q1,0);
         if (!speculate) {
             drafts.clear(), qs.clear();
             continue;
@@ -614,13 +663,19 @@ Finish Session::generate(int max_new, const Sampling& s, const std::function<voi
         for (int j = 1; j < k; ++j) {
             if (pen_drafts) pen_seq.push_back(drafts.back());
             Dist q;
-            drafts.push_back(draft_one(1, false, j == 1 ? used - 1 : 0, {drafts.back()}, p + used - 1 + j, pen_seq, q));
+            drafts.push_back(draft_one(1, false, j == 1 ? used - 1 : 0, {drafts.back()}, p + used - 1 + j, pen_seq, q,j));
             qs.push_back(std::move(q));
         }
     }
     prompt_.clear();
     timing_ = nullptr;
     st.decode_ms = ms_since(t0);
+    if(proposal_stats && overlap_count)
+        for(int i=0;i<6;++i)std::fprintf(stderr,"fnx: draft proposal overlap: power=%.2f samples=%zu mean=%.8f\n",
+                                       probes[i],overlap_count,overlap[i]/overlap_count);
+    if(calibration_mode==1 && calibrated_count)
+        for(int i=0;i<5;++i)std::fprintf(stderr,"fnx: draft calibration heldout: strength=%.2f samples=%zu baseline=%.8f calibrated=%.8f\n",
+                                       strengths[i],calibrated_count,base_overlap/calibrated_count,calibrated_overlap[i]/calibrated_count);
     return fin;
 }
 

@@ -16,7 +16,8 @@
 #include <string>
 #include <vector>
 
-#include "qdot.cuh"        // the quantized decode dots (ggml vecdotq.cuh's arithmetic, MIT; see the file)
+#include "qdot.cuh"
+#include "cuda/native_quant.cuh"        // the quantized decode dots (ggml vecdotq.cuh's arithmetic, MIT; see the file)
 #include "iqdot_hip.cuh"   // HIP: the i-quant dots with a cheaper sign expansion (same integers as ggml's)
 
 // compiled in parts (Makefile: build/kernels_pN.o with -DFNX_KPART=N), each with its share of the launchers below and
@@ -115,6 +116,12 @@ __global__ void k_quantize(const float* x, block_q8_1* q, int n, int8_t* tq, flo
 
 // ---------------------------------------------------------------- jobs of quantized matrix x vectors
 template <GgmlType type> __device__ __forceinline__ float vdot(const void* v, const block_q8_1* y, int kbx, int iqs) {
+    #if !FNX_HIP
+    if constexpr (type == T_IQ2_XXS) return vec_dot_iq2_xxs_q8_1(v, y, kbx, iqs);
+    else if constexpr (type == T_IQ2_XS) return vec_dot_iq2_xs_q8_1(v, y, kbx, iqs);
+    else if constexpr (type == T_Q2_0) return vec_dot_q2_0_q8_1(v, y - (kbx & 1), kbx / 2, kbx & 1);
+    else
+#endif
     if constexpr (type == T_Q8_0) return vec_dot_q8_0_q8_1(v, y, kbx, iqs);
     else if constexpr (type == T_Q4_K) return vec_dot_q4_K_q8_1(v, y, kbx, iqs);
     else if constexpr (type == T_Q5_K) return vec_dot_q5_K_q8_1(v, y, kbx, iqs);
@@ -141,7 +148,9 @@ template <GgmlType type> __device__ __forceinline__ float vdot(const void* v, co
     else return 0.0f;
 }
 template <GgmlType type> constexpr int vdr_of() {
-    if constexpr (type == T_Q8_0) return VDR_Q8_0;
+    if constexpr (type == T_Q2_0) return 1;
+    else if constexpr (type == T_IQ2_XXS || type == T_IQ2_XS) return 2;
+    else if constexpr (type == T_Q8_0) return VDR_Q8_0;
     else if constexpr (type == T_Q4_K) return VDR_Q4_K;
     else if constexpr (type == T_Q5_K) return VDR_Q5_K;
     else if constexpr (type == T_Q5_1) return VDR_Q5_1;
@@ -2176,6 +2185,11 @@ void moe_mm(bool down, const DW& A, size_t sa, const Job* jobs, const int* njobs
         case T_IQ3_S: moe_launch<T_IQ3_S>(down, w, jobs, njobs, njobs_max, in, (float*) out, s, T); break;
         case T_IQ3_XXS: moe_launch<T_IQ3_XXS>(down, w, jobs, njobs, njobs_max, in, (float*) out, s, T); break;
         case T_IQ2_S: moe_launch<T_IQ2_S>(down, w, jobs, njobs, njobs_max, in, (float*) out, s, T); break;
+#if !FNX_HIP
+        case T_IQ2_XXS: moe_launch<T_IQ2_XXS>(down, w, jobs, njobs, njobs_max, in, (float*) out, s, T); break;
+        case T_IQ2_XS: moe_launch<T_IQ2_XS>(down, w, jobs, njobs, njobs_max, in, (float*) out, s, T); break;
+        case T_Q2_0: moe_launch<T_Q2_0>(down, w, jobs, njobs, njobs_max, in, (float*) out, s, T); break;
+#endif
         default: throw std::runtime_error("moe: expert type " + std::to_string(A.type) + " not handled");
     }
     ck_launch(down ? "moe_down" : "moe_gate_up");
@@ -2224,6 +2238,11 @@ void moe_gate_up(const DW& A, size_t sa, const Job* jobs, const int* njobs, int 
         case T_IQ3_S: gu_sd_launch<T_IQ3_S>(T, w, jobs, njobs, njobs_max, y, gu, s, sd); break;
         case T_IQ3_XXS: gu_sd_launch<T_IQ3_XXS>(T, w, jobs, njobs, njobs_max, y, gu, s, sd); break;
         case T_IQ2_S: gu_sd_launch<T_IQ2_S>(T, w, jobs, njobs, njobs_max, y, gu, s, sd); break;
+#if !FNX_HIP
+        case T_IQ2_XXS: gu_sd_launch<T_IQ2_XXS>(T, w, jobs, njobs, njobs_max, y, gu, s, sd); break;
+        case T_IQ2_XS: gu_sd_launch<T_IQ2_XS>(T, w, jobs, njobs, njobs_max, y, gu, s, sd); break;
+        case T_Q2_0: gu_sd_launch<T_Q2_0>(T, w, jobs, njobs, njobs_max, y, gu, s, sd); break;
+#endif
         default: throw std::runtime_error("moe_gate_up: the shared expert rides in the launch of expert type " + std::to_string(A.type) + " only for the types moe_mm handles");
     }
     ck_launch("moe_gate_up (with the shared expert)");
@@ -2251,6 +2270,11 @@ void moe_mm_big(bool down, const DW& A, size_t sa, const BigJob* jobs, const int
         case T_IQ3_S: moe_launch_big<T_IQ3_S>(down, w, jobs, njobs, njobs_cap, in, (float*) out, s); break;
         case T_IQ3_XXS: moe_launch_big<T_IQ3_XXS>(down, w, jobs, njobs, njobs_cap, in, (float*) out, s); break;
         case T_IQ2_S: moe_launch_big<T_IQ2_S>(down, w, jobs, njobs, njobs_cap, in, (float*) out, s); break;
+#if !FNX_HIP
+        case T_IQ2_XXS: moe_launch_big<T_IQ2_XXS>(down, w, jobs, njobs, njobs_cap, in, (float*) out, s); break;
+        case T_IQ2_XS: moe_launch_big<T_IQ2_XS>(down, w, jobs, njobs, njobs_cap, in, (float*) out, s); break;
+        case T_Q2_0: moe_launch_big<T_Q2_0>(down, w, jobs, njobs, njobs_cap, in, (float*) out, s); break;
+#endif
         default: throw std::runtime_error("moe: expert type " + std::to_string(A.type) + " not handled");
     }
     ck_launch(down ? "moe_down (big jobs)" : "moe_gate_up (big jobs)");

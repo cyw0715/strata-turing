@@ -73,12 +73,16 @@ template <typename T> T* hpalloc(size_t n) {
     return (T*) p;
 }
 
-#if FNX_HIP
+#if FNX_HIP || FNX_CUDA_PEER
 // FNX_PF_PEER: n zeroed values of fine-grained device memory on the current card (the other cards' kernels store into it; hip/peer.h enabled the access), released by ~Engine
 template <typename T> T* ppalloc(size_t n) {
     void* p = nullptr;
+#if FNX_HIP
     if (hipExtMallocWithFlags(&p, n * sizeof(T), hipDeviceMallocFinegrained) != hipSuccess)
         throw std::runtime_error("prefill: fine-grained device allocation of " + std::to_string(n * sizeof(T) >> 10) + " KiB failed");
+#else
+    ckc(cudaMalloc(&p, n * sizeof(T)), "peer prompt buffer allocation");
+#endif
     pf_card_bytes += n * sizeof(T);
     ckc(FNX_ZERO_DEV(p, n * sizeof(T)), "peer buffer clear");
     own_dev(p);
@@ -123,7 +127,7 @@ static __global__ void k_pfr_add(const __half2* __restrict__ in, const float2* _
 // one thread: card 0's copy waits for a flag only card 1's (not yet enqueued) work sets, so the first read stalled. A kernel does not block.
 static __global__ void k_pfr_copy(const uint4* __restrict__ src, uint4* __restrict__ dst, size_t n16, int sysfence = 0) {
     for (size_t e = blockIdx.x * (size_t) blockDim.x + threadIdx.x; e < n16; e += (size_t) gridDim.x * blockDim.x) dst[e] = src[e];
-#if FNX_HIP
+#if FNX_HIP || FNX_CUDA_PEER
     if (sysfence) __threadfence_system();   // (the destination is the next card's host memory)
 #endif
 }
@@ -141,13 +145,13 @@ static __global__ void k_pfr_add_gather(const __half2* __restrict__ in, const fl
 #pragma unroll
         for (int d = 0; d < NCARD; ++d) dst.p[d][e] = h;
     }
-#if FNX_HIP
+#if FNX_HIP || FNX_CUDA_PEER
     // the stores into the other cards' host buffers must be visible system-wide before the stream's flag write tells them so (a copy engine reads
     // that memory at once; a kernel read came late enough to hide it)
     if (dst.sysfence) __threadfence_system();
 #endif
 }
-#if FNX_HIP
+#if FNX_HIP || FNX_CUDA_PEER
 // FNX_PF_PEER, small chunks (rows <= p.a2a_rows): the sum in ONE cross-card latency instead of the ring's NCARD hops of copy + flag + wait. Every card stores its f32 addends of the
 // chunk into slot [its number] of every other card's mailbox (device memory of the receiver, fine-grained), the last block to finish its stores raises the flag [its number] on
 // every other card; then every card waits for its NCARD - 1 flags and makes the whole sum itself, row by row in the ring's own order and roundings: part k of the rows
@@ -181,7 +185,11 @@ static __global__ void k_pfa_sum(float* __restrict__ x, int C, const float4* __r
     if (threadIdx.x < NCARD && (int) threadIdx.x != g) {
         const long long t0 = clock64();
         while ((int) (*(volatile const unsigned*) (flag + threadIdx.x) - seq) < 0) {
+            #if FNX_HIP
             __builtin_amdgcn_s_sleep(1);
+#else
+            __nanosleep(64);
+#endif
             if (clock64() - t0 > 4000000000LL) { atomicOr(err, 1u); break; }
         }
     }

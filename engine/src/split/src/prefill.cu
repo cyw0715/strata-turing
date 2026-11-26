@@ -9,11 +9,14 @@
 // over the chunk's final residuals in windows of MAXT rows).
 #include "pf_common.cuh"
 #include "engine.hpp"
+#include "cuda/phase_cache.h"
 #include "engine_impl.hpp"
 #include "env.hpp"
 #include "pf_ring_plan.hpp"
 #if FNX_HIP
 #include "hip/rccl.h"
+#elif FNX_CUDA_PEER
+#include "cuda/nccl.h"
 #endif
 
 #include <cublas_v2.h>
@@ -25,11 +28,13 @@
 #include <cuda_runtime.h>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <exception>
 #include <map>
 #include <set>
 #include <vector>
@@ -350,7 +355,7 @@ struct Engine::Pf {
     std::vector<std::function<void()>> post;
     int dev = 0;
     unsigned seq = 0;
-#if FNX_HIP
+#if FNX_HIP || FNX_CUDA_PEER
     // FNX_PF_PEER small-chunk sum (pf_common.cuh k_pfa_*): this card's mailbox [2 sets][NCARD senders][a2a_rows * N] f32 and flags [NCARD], the peers' pointers, the push kernel's counter
     int a2a_rows = 0;
     float4* a2a_box = nullptr;
@@ -443,6 +448,17 @@ struct Engine::Pf {
     // into stage[l & 1] (on cs) of layer l's experts not in a slot, as many as fit; the rest are read in place
     char* stage[2] = {};
     size_t stage_bytes = 0;
+#if FNX_CUDA_PEER
+    std::vector<int> decode_experts;    // temporary virtual slots backed by the idle stages
+    bool decode_cache_ready = false;
+#if FNX_ARCH == 75
+    PhaseCache dynamic_cache;
+#endif
+    bool decode_cache_pending = false;
+    std::chrono::steady_clock::time_point decode_cache_started;
+    bool decode_cache_checked = false;
+    std::vector<std::pair<char*, size_t>> decode_regions; // owned prompt scratch, excluding borrowed snapshots and flags
+#endif
     size_t alloc_bytes = 0;           // what the prompt path holds on this card (palloc's tally; the stages added later)
     int stage_rows = 0;               // FNX_PF_STAGE_ROWS (default 2048): shorter reads take the experts in place
     const char **ep_gu = nullptr, **ep_dn = nullptr, **ep_hgu = nullptr, **ep_hdn = nullptr;
@@ -453,6 +469,12 @@ struct Engine::Pf {
         size_t n;
     };
     std::vector<Copy> copies[NL];
+#if FNX_CUDA_PEER
+    std::vector<Copy> decode_copies;
+    std::thread decode_thread;
+    std::atomic<bool> decode_done{false};
+    std::exception_ptr decode_error;
+#endif
     size_t staged = 0, in_place = 0;  // the pass's expert bytes copied in, and left in RAM
     cudaStream_t cs = nullptr;
     cudaEvent_t ev_ready[2], ev_done[2];   // stage[k] filled; its layer's experts done with
@@ -723,7 +745,7 @@ __global__ void k_pfr_addend(float* __restrict__ x, const float* __restrict__ pa
 void pf_ring(Engine::Pf& p, int g, float* x, int C, const RingMoe* m, unsigned* err, cudaStream_t s, bool own_out = false) {
     const unsigned seq = ++p.seq;
     if (m) k_pfr_addend<<<grid_for((size_t) C * N), 256, 0, s>>>(x, m->part, m->topw, m->logits, C);
-#if FNX_HIP
+#if FNX_HIP || FNX_CUDA_PEER
     if (p.rccl) {
         const RcclApi& api = *(const RcclApi*) p.rc_api;
         const size_t n = (size_t) C * N;
@@ -741,7 +763,7 @@ void pf_ring(Engine::Pf& p, int g, float* x, int C, const RingMoe* m, unsigned* 
         return;
     }
 #endif
-#if FNX_HIP
+#if FNX_HIP || FNX_CUDA_PEER
     if (p.a2a_rows > 0 && C <= p.a2a_rows && !own_out) {   // a small chunk: all-to-all and a local sum, one cross-card latency (bit-identical to the ring)
         const size_t slot4 = (size_t) p.a2a_rows * N / 4, set_off4 = (size_t) (seq & 1u) * NCARD * slot4;
         const int n4 = C * N / 4;
@@ -837,7 +859,7 @@ void Engine::pf_seq_reset(unsigned start) {
         if (p.att_pend >= 0) throw std::runtime_error("prefill: sequence numbers restarted with an attention merge pending");
         ckc(cudaSetDevice(p.dev), "set");
         ckc(cudaMemset(p.ring_ce.flags, 0, 2 * PF_RING_STEPS * sizeof(unsigned)), "prompt ring flags");
-#if FNX_HIP
+#if FNX_HIP || FNX_CUDA_PEER
         if (p.a2a_flag) ckc(cudaMemset(p.a2a_flag, 0, NCARD * sizeof(unsigned)), "small-chunk sum flags");
 #endif
         for (unsigned* f : p.aflags) ckc(cudaMemset(f, 0, ATT_FLAG_ROWS * ATT_PIECES_MAX * sizeof(unsigned)), "attention exchange flags");
@@ -853,6 +875,10 @@ void Engine::pf_seq_reset(unsigned start) {
 
 void Engine::prefill_alloc() {
     if (!pf_.empty()) throw std::runtime_error("prefill_alloc: the prompt path's buffers exist already");
+    if (env_int("FNX_PF_DECODE_CACHE_DYNAMIC", 0) &&
+        (!env_int("FNX_PF_DECODE_CACHE", 0) || env_int("FNX_PF_DECODE_CACHE_ASYNC", 0) ||
+         m_.arena || !env_int("FNX_STATIC_EXPERTS", 0)))
+        throw std::runtime_error("demand cache needs phase reuse, static experts, no arena and no async preload");
     pf_.resize(NCARD);
     for (int c = 0; c < NCARD; ++c) {
         CardBuf& b = *cb_[c];
@@ -862,6 +888,32 @@ void Engine::prefill_alloc() {
         ckc(cudaMemGetInfo(&free0, &tot0), "mem info");
         pf_card_bytes = 0;
         Pf* p = new Pf;
+#if FNX_CUDA_PEER
+        auto prompt_float = [&](size_t n) {
+            float* x = palloc<float>(n);
+            p->decode_regions.emplace_back((char*) x, n * sizeof(float));
+            return x;
+        };
+        auto prompt_half = [&](size_t n) {
+            __half* x = palloc<__half>(n);
+            p->decode_regions.emplace_back((char*) x, n * sizeof(__half));
+            return x;
+        };
+#else
+        auto prompt_float = [](size_t n) { return palloc<float>(n); };
+        auto prompt_half = [](size_t n) { return palloc<__half>(n); };
+#endif
+#if FNX_CUDA_PEER && FNX_ARCH == 75
+        if (env_int("FNX_CACHE_STATS", 0)) expert_cache_stats_[c] = palloc<unsigned long long>(4);
+        if (env_int("FNX_PF_DECODE_CACHE_DYNAMIC", 0)) {
+            p->dynamic_cache.gu = palloc<char*>((size_t) NL * NEXP);
+            p->dynamic_cache.dn = palloc<char*>((size_t) NL * NEXP);
+            p->dynamic_cache.owner = palloc<int>((size_t) NL * NEXP);
+            p->dynamic_cache.ref = palloc<unsigned char>((size_t) NL * NEXP);
+            phase_cache_state_[c] = palloc<PhaseCache>(1);
+            ckc(cudaMemcpy(phase_cache_state_[c], &p->dynamic_cache, sizeof(PhaseCache), cudaMemcpyHostToDevice), "demand cache initial descriptor");
+        }
+#endif
         ckb(cublasCreate(&p->blas), "create");
         {
             const int d = current_card();
@@ -924,7 +976,11 @@ void Engine::prefill_alloc() {
             rec_set(dry), phase = std::max(phase, dry.off), dry.off = 0;
             ple_set(dry), phase = std::max(phase, dry.off);
         }
-        char* region = big.fits(phase) ? big.take<char>(phase) : palloc<char>(phase);
+        const bool borrowed_phase = big.fits(phase);
+        char* region = borrowed_phase ? big.take<char>(phase) : palloc<char>(phase);
+#if FNX_CUDA_PEER
+        if (!borrowed_phase) p->decode_regions.emplace_back(region, phase);
+#endif
         for (auto set : {0, 1, 2, 3}) {
             Arena a{region, phase};
             if (set == 0) ffn_set(a);
@@ -932,21 +988,21 @@ void Engine::prefill_alloc() {
             else if (set == 2) rec_set(a);
             else ple_set(a);
         }
-        auto from_big = [&](size_t floats) { return big.fits(floats * sizeof(float)) ? big.take<float>(floats) : palloc<float>(floats); };
+        auto from_big = [&](size_t floats) { return big.fits(floats * sizeof(float)) ? big.take<float>(floats) : prompt_float(floats); };
         p->up32 = from_big(std::max<size_t>((size_t) pf_c_ * D, (size_t) pf_c_ * NQH * 2 * HD / 2 + 16));
         p->xf = from_big((size_t) pf_c_ * D);
         p->bo_a = from_big((size_t) pf_c_ * N);
         p->widx = from_big((size_t) qsa_rows() * N);
-        p->wh = palloc<__half>(PF_WH);
-        p->xh = palloc<__half>((size_t) pf_c_ * D);
-        p->R = palloc<float>((size_t) pf_c_ * D);
-        p->rs = palloc<float>((size_t) pf_c_ * HC);
-        p->lo32 = palloc<float>((size_t) pf_c_ * LR);
-        p->lo16 = palloc<__half>((size_t) pf_c_ * LR);
-        p->mixed = palloc<float>((size_t) pf_c_ * N);
-        p->bo_f = palloc<float>((size_t) pf_c_ * N);
-        p->inj_a = palloc<float>((size_t) pf_c_ * HC);
-        p->inj_f = palloc<float>((size_t) pf_c_ * HC);
+        p->wh = prompt_half(PF_WH);
+        p->xh = prompt_half((size_t) pf_c_ * D);
+        p->R = prompt_float((size_t) pf_c_ * D);
+        p->rs = prompt_float((size_t) pf_c_ * HC);
+        p->lo32 = prompt_float((size_t) pf_c_ * LR);
+        p->lo16 = prompt_half((size_t) pf_c_ * LR);
+        p->mixed = prompt_float((size_t) pf_c_ * N);
+        p->bo_f = prompt_float((size_t) pf_c_ * N);
+        p->inj_a = prompt_float((size_t) pf_c_ * HC);
+        p->inj_f = prompt_float((size_t) pf_c_ * HC);
         p->moe_q8 = env_flag("FNX_PF_MOE_Q8");
         if (p->moe_q8) {
             p->xq = palloc<uint8_t>((size_t) pf_c_ * q8_1_bytes(N));
@@ -962,7 +1018,7 @@ void Engine::prefill_alloc() {
         p->njobs = palloc<int>(2);
         p->jobs_gu = palloc<BigJob>(pf_jobs_);
         p->jobs_dn = palloc<BigJob>(pf_jobs_);
-        p->ple_emb = palloc<float>((size_t) pf_c_ * N);
+        p->ple_emb = prompt_float((size_t) pf_c_ * N);
         p->ctl = palloc<int>((size_t) (1 + (pf_c_ / MAXT)) * 2);
         p->ring_sm = env_int("FNX_PF_RING_SM", 0) != 0;   // strata-split: the chunk sums go through host memory on the copy engines; FNX_PF_RING_SM=1 is the GPU-thread ring (slower, kept as the fallback path)
         p->ring = b.ring;
@@ -978,7 +1034,7 @@ void Engine::prefill_alloc() {
             const size_t share = (size_t) (pf_c_ + NCARD - 1) / NCARD * N;   // a card's share of the rows
             r.send = palloc<__half>(share);
             for (int k = 0; k < 2; ++k) {
-#if FNX_HIP
+#if FNX_HIP || FNX_CUDA_PEER
                 if (pf_peer_) {   // device memory on this card: the previous card's kernels store into it
                     for (int h = 0; h < NCARD - 1; ++h) r.in[h][k] = ppalloc<__half>(share);
                     r.ag[k] = ppalloc<__half>((size_t) pf_c_ * N);
@@ -991,12 +1047,12 @@ void Engine::prefill_alloc() {
                 for (int h = 0; h < NCARD - 1; ++h) r.din[h][k] = palloc<__half>(share);
                 r.dag[k] = palloc<__half>((size_t) pf_c_ * N);
             }
-#if FNX_HIP
+#if FNX_HIP || FNX_CUDA_PEER
             if (pf_peer_) r.flags = ppalloc<unsigned>(2 * PF_RING_STEPS);
             else
 #endif
             r.flags = hpalloc<unsigned>(2 * PF_RING_STEPS);
-#if FNX_HIP
+#if FNX_HIP || FNX_CUDA_PEER
             if (pf_peer_) {   // the small-chunk sum: FNX_PF_A2A_ROWS rows at most (0: always the ring)
                 const long long ar = env_int("FNX_PF_A2A_ROWS", 256);
                 p->a2a_rows = (int) std::min<long long>(std::max<long long>(ar, 0), pf_c_);
@@ -1011,7 +1067,7 @@ void Engine::prefill_alloc() {
 #endif
         }
         p->dev = b.dev;
-#if FNX_HIP
+#if FNX_HIP || FNX_CUDA_PEER
         if (rccl_on_) {
             p->rccl = true;
             p->rc_f32 = env_int("FNX_PF_RCCL_F32", 0) != 0;
@@ -1070,12 +1126,12 @@ void Engine::prefill_alloc() {
             if (pass < 1 || pass > PF_PASS) throw std::runtime_error("FNX_PF_PASS: 1 to " + std::to_string(PF_PASS) + ", got " + std::to_string(pass));
             p->pass = (int) pass;
             for (int k = 1; k < p->pass; ++k) {
-                p->Rk[k] = palloc<float>((size_t) pf_c_ * D);
-                p->bofk[k] = palloc<float>((size_t) pf_c_ * N);
-                p->injfk[k] = palloc<float>((size_t) pf_c_ * HC);
+                p->Rk[k] = prompt_float((size_t) pf_c_ * D);
+                p->bofk[k] = prompt_float((size_t) pf_c_ * N);
+                p->injfk[k] = prompt_float((size_t) pf_c_ * HC);
                 p->ctlk[k] = palloc<int>((size_t) (1 + (pf_c_ / MAXT)) * 2);
-                p->boak[k] = palloc<float>((size_t) pf_c_ * N);
-                p->injak[k] = palloc<float>((size_t) pf_c_ * HC);
+                p->boak[k] = prompt_float((size_t) pf_c_ * N);
+                p->injak[k] = prompt_float((size_t) pf_c_ * HC);
             }
             p->overlap = !p->ring_sm && env_int("FNX_PF_OVERLAP", 1) != 0;
             if (p->overlap) {
@@ -1103,10 +1159,10 @@ void Engine::prefill_alloc() {
                 ckc(cudaStreamCreateWithFlags(&p->ag_st, cudaStreamNonBlocking), "swap stream");
                 own_stream(p->ag_st);
                 if (p->hf16)
-                    for (int k = 0; k < p->pass; ++k) p->mixhk[k] = palloc<__half>((size_t) pf_c_ * N);
+                    for (int k = 0; k < p->pass; ++k) p->mixhk[k] = prompt_half((size_t) pf_c_ * N);
                 const size_t share = (size_t) (pf_c_ + NCARD - 1) / NCARD;
                 p->mixedk[0] = p->mixed;
-                for (int k = 1; k < p->pass; ++k) p->mixedk[k] = palloc<float>((size_t) pf_c_ * N);
+                for (int k = 1; k < p->pass; ++k) p->mixedk[k] = prompt_float((size_t) pf_c_ * N);
                 for (int k = 0; k < 2; ++k) {
                     p->hg_in[k] = hpalloc<float>(share * N);
                     p->hg_flags[k] = hpalloc<unsigned>(8);
@@ -1179,7 +1235,7 @@ void Engine::prefill_alloc() {
         }
         r.nflags = n.ring_ce.flags;
         r.next_dev = n.dev;
-#if FNX_HIP
+#if FNX_HIP || FNX_CUDA_PEER
         if (p.a2a_rows > 0) {
             ckc(cudaSetDevice(p.dev), "set");
             float4* boxes[NCARD];
@@ -1259,6 +1315,405 @@ void Engine::prefill_stages() {
     }
 }
 
+#if FNX_CUDA_PEER
+void Engine::print_expert_cache_stats() {
+    for (int c = 0; c < NCARD; ++c) {
+        auto* stats = expert_cache_stats_[c];
+        if (!stats) continue;
+        unsigned long long v[4] = {};
+        ckc(cudaSetDevice(cb_[c]->dev), "cache stats device");
+        ckc(cudaMemcpy(v, stats, sizeof v, cudaMemcpyDeviceToHost), "cache stats read");
+        std::fprintf(stderr, "fnx: decode cache card %d: %llu jobs, %llu misses, %.3f GiB copied, %.3f%% hit, %llu layer-windows\n",
+                     c, v[0], v[1], (double) v[2] / (1ull << 30), v[0] ? 100.0 * (v[0] - v[1]) / v[0] : 0.0, v[3]);
+        ckc(cudaMemset(stats, 0, sizeof v), "cache stats clear");
+    }
+}
+
+namespace {
+void check_decode_cache(Engine::Pf& p, const CardW& w) {
+    const int check = env_int("FNX_PF_DECODE_CACHE_VERIFY", 0);
+    if (!check || (p.decode_cache_checked && check == 1)) return;
+    std::vector<char> actual, expected;
+    for (int g : p.decode_experts) {
+        const LayerW& L = w.L[g / NEXP];
+        const size_t gs = L.gu_e_stride, ds = L.down_e_stride;
+        actual.resize(gs + ds);
+        expected.resize(gs + ds);
+        ckc(cudaMemcpy(actual.data(), p.ep_hgu[g], gs, cudaMemcpyDefault), "decode cache check gate");
+        ckc(cudaMemcpy(actual.data() + gs, p.ep_hdn[g], ds, cudaMemcpyDefault), "decode cache check down");
+        ckc(cudaMemcpy(expected.data(), w.ec_host_gu[g], gs, cudaMemcpyDefault), "decode cache check source gate");
+        ckc(cudaMemcpy(expected.data() + gs, w.ec_host_dn[g], ds, cudaMemcpyDefault), "decode cache check source down");
+        if (actual != expected) throw std::runtime_error("prompt decode cache byte comparison failed");
+    }
+    std::fprintf(stderr, "fnx: prompt decode cache byte comparison passed for %zu experts on card %d\n", p.decode_experts.size(), p.dev);
+    p.decode_cache_checked = true;
+}
+void read_decode_cache(Engine::Pf& p, const ExpertCache& ec) {
+    const size_t ne = (size_t) NL * NEXP;
+    ckc(cudaMemcpy(p.ep_hgu, ec.ep_gu, ne * sizeof(char*), cudaMemcpyDeviceToHost), "decode cache gate table");
+    ckc(cudaMemcpy(p.ep_hdn, ec.ep_dn, ne * sizeof(char*), cudaMemcpyDeviceToHost), "decode cache down table");
+    ckc(cudaMemcpy(p.slot_h, ec.slot_of, ne * sizeof(int), cudaMemcpyDeviceToHost), "decode cache slots");
+}
+void write_decode_cache(Engine::Pf& p, const ExpertCache& ec) {
+    const size_t ne = (size_t) NL * NEXP;
+    ckc(cudaMemcpy(ec.ep_gu, p.ep_hgu, ne * sizeof(char*), cudaMemcpyHostToDevice), "decode cache publish gate");
+    ckc(cudaMemcpy(ec.ep_dn, p.ep_hdn, ne * sizeof(char*), cudaMemcpyHostToDevice), "decode cache publish down");
+    ckc(cudaMemcpy(ec.slot_of, p.slot_h, ne * sizeof(int), cudaMemcpyHostToDevice), "decode cache publish slots");
+}
+}
+
+#if FNX_CUDA_PEER && FNX_ARCH == 75
+void Engine::prefill_cache_dynamic(bool enable) {
+    if (enable && (warming_ || pos_ < 4096 || pf_[0]->decode_cache_ready)) return;
+    if (!enable && !pf_[0]->decode_cache_ready) return;
+    const auto start = std::chrono::steady_clock::now();
+    for (CardBuf* b : cb_) {
+        ckc(cudaSetDevice(b->dev), "demand cache device");
+        ckc(cudaDeviceSynchronize(), "demand cache idle");
+    }
+    if (enable && env_int("FNX_PF_DECODE_CACHE_KV", 0)) {
+        const int keep = (int) env_int("FNX_PF_DECODE_CACHE_KV_KEEP_PAGES", 8192 / KVP_POS + 2);
+        if (keep < 1) throw std::runtime_error("demand cache K/V keep pages must be positive");
+        if (!prompt_cache_pages_.empty()) throw std::runtime_error("demand cache already holds K/V pages");
+        if (free_pages_.size() > (size_t) keep) {
+            const size_t n = free_pages_.size() - keep;
+            prompt_cache_pages_.assign(free_pages_.begin(), free_pages_.begin() + n);
+            free_pages_.erase(free_pages_.begin(), free_pages_.begin() + n);
+        }
+    }
+    for (int c = 0; c < NCARD; ++c) {
+        Pf& p = *pf_[c];
+        const ExpertCache& ec = m_.cards[c].ec;
+        PhaseCache& pc = p.dynamic_cache;
+        ckc(cudaSetDevice(p.dev), "demand cache device");
+        if (enable) {
+            std::vector<std::pair<char*, size_t>> regions{{p.stage[0], p.stage_bytes}, {p.stage[1], p.stage_bytes}};
+            if (env_int("FNX_PF_DECODE_CACHE_WORK", 0)) regions.insert(regions.end(), p.decode_regions.begin(), p.decode_regions.end());
+            for (size_t i = 0; i < prompt_cache_pages_.size();) {
+                const int high = prompt_cache_pages_[i];
+                size_t end = i + 1;
+                while (end < prompt_cache_pages_.size() && prompt_cache_pages_[end] == prompt_cache_pages_[end - 1] - 1) ++end;
+                const int low = prompt_cache_pages_[end - 1];
+                regions.emplace_back((char*) (cb_[c]->pool + (size_t) low * cb_[c]->pg.page),
+                                     (size_t) (high - low + 1) * cb_[c]->pg.page * sizeof(uint16_t));
+                i = end;
+            }
+            std::vector<char*> gu, dn;
+            size_t bytes = 0;
+            pc.nclasses = 0;
+            if (env_int("FNX_PF_DECODE_CACHE_PACKED", 0)) {
+                // Equal cached fractions of the cold experts, using their actual
+                // byte sizes. Fixed hot experts and the base pool stay in place.
+                std::vector<std::pair<size_t, int>> sizes;
+                for (int l = 0; l < NL; ++l) {
+                    const LayerW& L = m_.cards[c].L[l];
+                    const size_t span = (L.gu_e_stride + L.down_e_stride + 255) & ~(size_t) 255;
+                    int cold = 0;
+                    for (int e = 0; e < NEXP; ++e) cold += !m_.resident[l][e];
+                    if (!cold) continue;
+                    auto it = std::find_if(sizes.begin(), sizes.end(), [&](const auto& s) { return s.first == span; });
+                    if (it == sizes.end()) sizes.emplace_back(span, cold);
+                    else it->second += cold;
+                }
+                std::sort(sizes.begin(), sizes.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
+                if (sizes.size() > sizeof(pc.classes) / sizeof(pc.classes[0]))
+                    throw std::runtime_error("packed demand cache has too many expert sizes");
+                std::vector<size_t> used;
+                size_t available = 0, full = 0;
+                for (const auto& region : regions) {
+                    const size_t pad = (256 - (std::uintptr_t) region.first % 256) % 256;
+                    used.push_back(std::min(pad, region.second));
+                    available += region.second - used.back();
+                }
+                for (const auto& size : sizes) full += size.first * (size_t) size.second;
+                for (const auto& size : sizes) {
+                    PhaseCacheClass& cl = pc.classes[pc.nclasses++];
+                    cl = {};
+                    cl.span = size.first;
+                    cl.start = (int) gu.size();
+                    cl.hand = ec.n_slots;
+                    const int target = full ? (int) std::min<size_t>(size.second, available * size.second / full) : 0;
+                    for (int i = 0; i < target; ++i) {
+                        size_t r = 0;
+                        while (r < regions.size() && size.first > regions[r].second - used[r]) ++r;
+                        if (r == regions.size()) break;
+                        gu.push_back(regions[r].first + used[r]);
+                        dn.push_back(nullptr); // published as gu + the incoming expert's gate/up stride
+                        used[r] += size.first;
+                        bytes += size.first;
+                        ++cl.count;
+                    }
+                    std::fprintf(stderr, "fnx: packed demand cache card %d: span=%zu cold=%d extra=%d\n",
+                                 c, cl.span, size.second, cl.count);
+                }
+            } else {
+                const size_t span = (ec.slot_bytes[0] + 255) & ~(size_t) 255;
+                for (const auto& region : regions) {
+                    const size_t pad = (256 - (std::uintptr_t) region.first % 256) % 256;
+                    for (size_t offset = pad; offset + span <= region.second && gu.size() < (size_t) NL * NEXP; offset += span) {
+                        gu.push_back(region.first + offset);
+                        dn.push_back(region.first + offset + ec.dn_off[0]);
+                        bytes += span;
+                    }
+                }
+            }
+            pc.count = (int) gu.size();
+            pc.hand = ec.n_slots;
+            if (pc.count) {
+                ckc(cudaMemcpy(pc.gu, gu.data(), gu.size() * sizeof(char*), cudaMemcpyHostToDevice), "demand cache gate slots");
+                ckc(cudaMemcpy(pc.dn, dn.data(), dn.size() * sizeof(char*), cudaMemcpyHostToDevice), "demand cache down slots");
+                ckc(cudaMemset(pc.owner, 0xff, gu.size() * sizeof(int)), "demand cache clear owners");
+                ckc(cudaMemset(pc.ref, 0, gu.size()), "demand cache clear refs");
+            }
+            std::fprintf(stderr, "fnx: demand decode cache card %d: %d extra CLOCK slots, %zu MiB, no weight preload\n",
+                         c, pc.count, bytes >> 20);
+        } else {
+            read_decode_cache(p, ec);
+            for (int g = 0; g < NL * NEXP; ++g)
+                if (p.slot_h[g] >= ec.n_slots + NL * NEXP) p.decode_experts.push_back(g);
+            check_decode_cache(p, m_.cards[c]);
+            p.decode_experts.clear();
+            int purged = 0;
+            for (int g = 0; g < NL * NEXP; ++g)
+                if (p.slot_h[g] >= ec.n_slots + NL * NEXP) {
+                    p.slot_h[g] = -1;
+                    p.ep_hgu[g] = m_.cards[c].ec_host_gu[g];
+                    p.ep_hdn[g] = m_.cards[c].ec_host_dn[g];
+                    ++purged;
+                }
+            write_decode_cache(p, ec);
+            std::fprintf(stderr, "fnx: demand decode cache card %d: released %d cached experts\n", c, purged);
+            pc.count = pc.hand = 0;
+            pc.nclasses = 0;
+        }
+        ckc(cudaMemcpy(phase_cache_state_[c], &pc, sizeof pc, cudaMemcpyHostToDevice), "demand cache descriptor");
+        p.decode_cache_ready = enable;
+    }
+    if (!enable && !prompt_cache_pages_.empty()) {
+        free_pages_.insert(free_pages_.end(), prompt_cache_pages_.begin(), prompt_cache_pages_.end());
+        std::sort(free_pages_.begin(), free_pages_.end(), std::greater<int>());
+        std::fprintf(stderr, "fnx: demand cache returned %zu K/V pages\n", prompt_cache_pages_.size());
+        prompt_cache_pages_.clear();
+    }
+    std::fprintf(stderr, "fnx: demand decode cache %s in %.1f ms\n", enable ? "enabled" : "released",
+                 std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count());
+}
+#endif
+
+void Engine::prefill_cache_decode(bool enable) {
+    if (!env_int("FNX_PF_DECODE_CACHE", 0) || pf_.empty()) return;
+    if (m_.arena || !env_int("FNX_STATIC_EXPERTS", 0) || lanes_.size() != 1)
+        throw std::runtime_error("FNX_PF_DECODE_CACHE needs static experts, no arena and one lane");
+    if (env_int("FNX_PF_DECODE_CACHE_DYNAMIC", 0)) {
+#if FNX_ARCH == 75
+        prefill_cache_dynamic(enable);
+        return;
+#else
+        throw std::runtime_error("demand cache currently needs CUDA sm_75");
+#endif
+    }
+    if (enable && (warming_ || pos_ < 4096 || pf_[0]->decode_cache_ready)) return;
+    const bool pending = pf_[0]->decode_cache_pending;
+    if (!enable && !pf_[0]->decode_cache_ready && !pending) return;
+    const bool async = env_int("FNX_PF_DECODE_CACHE_ASYNC", 0) != 0;
+    if (enable && pending) {
+        const long long delay = env_int("FNX_PF_DECODE_CACHE_PUBLISH_DELAY_MS", 0); // test-only delayed publication
+        if (delay < 0 || delay > 60000) throw std::runtime_error("decode cache publication delay: want 0..60000 ms");
+        if (std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - pf_[0]->decode_cache_started).count() < delay) return;
+        for (Pf* p : pf_) {
+            if (!p->decode_done.load(std::memory_order_acquire)) return;
+        }
+    }
+    const auto start = std::chrono::steady_clock::now();
+    if (pending) {
+        for (Pf* p : pf_)
+            if (p->decode_thread.joinable()) p->decode_thread.join();
+        for (Pf* p : pf_)
+            if (p->decode_error) std::rethrow_exception(p->decode_error);
+    }
+    // No graph is executing while its tables or the storage behind them change.
+    for (CardBuf* b : cb_) {
+        ckc(cudaSetDevice(b->dev), "decode cache device");
+        ckc(cudaDeviceSynchronize(), "decode cache idle");
+    }
+    auto return_pages = [&] {
+        if (prompt_cache_pages_.empty()) return;
+        free_pages_.insert(free_pages_.end(), prompt_cache_pages_.begin(), prompt_cache_pages_.end());
+        std::sort(free_pages_.begin(), free_pages_.end(), std::greater<int>());
+        std::fprintf(stderr, "fnx: decode cache returned %zu K/V pages\n", prompt_cache_pages_.size());
+        prompt_cache_pages_.clear();
+    };
+    if (pending) {
+        int superseded = 0;
+        for (int c = 0; c < NCARD; ++c) {
+            Pf& p = *pf_[c];
+            const CardW& w = m_.cards[c];
+            const ExpertCache& ec = w.ec;
+            ckc(cudaSetDevice(p.dev), "decode cache publication device");
+            check_decode_cache(p, w); // the pinned table still contains the planned target addresses
+            if (enable) {
+                std::vector<std::pair<const char*, const char*>> targets;
+                for (int g : p.decode_experts) targets.emplace_back(p.ep_hgu[g], p.ep_hdn[g]);
+                read_decode_cache(p, ec); // CLOCK may have changed both pointers and ownership during the copy
+                std::vector<int> owners(ec.n_slots);
+                std::vector<unsigned char> refs(ec.n_slots);
+                ckc(cudaMemcpy(owners.data(), ec.owner, owners.size() * sizeof(int), cudaMemcpyDeviceToHost), "decode cache owners");
+                ckc(cudaMemcpy(refs.data(), ec.ref, refs.size(), cudaMemcpyDeviceToHost), "decode cache refs");
+                for (size_t i = 0; i < p.decode_experts.size(); ++i) {
+                    const int g = p.decode_experts[i], slot = p.slot_h[g];
+                    if (slot >= ec.n_slots) throw std::runtime_error("pending decode expert became a fixed expert");
+                    if (slot >= 0) {
+                        if (owners[slot] != g) throw std::runtime_error("pending decode cache owner mismatch");
+                        owners[slot] = -1;
+                        refs[slot] = 0;
+                        ++superseded;
+                    }
+                    p.ep_hgu[g] = targets[i].first;
+                    p.ep_hdn[g] = targets[i].second;
+                    p.slot_h[g] = ec.n_slots + g;
+                }
+                for (int s = 0; s < ec.n_slots; ++s)
+                    if (owners[s] >= 0 && p.slot_h[owners[s]] != s) throw std::runtime_error("decode cache publication lost a physical owner");
+                ckc(cudaMemcpy(ec.owner, owners.data(), owners.size() * sizeof(int), cudaMemcpyHostToDevice), "decode cache publish owners");
+                ckc(cudaMemcpy(ec.ref, refs.data(), refs.size(), cudaMemcpyHostToDevice), "decode cache publish refs");
+                write_decode_cache(p, ec);
+            } else p.decode_experts.clear(); // tables were never published; preserve the live CLOCK entries
+            p.decode_cache_pending = false;
+            p.decode_cache_ready = enable;
+        }
+        if (!enable) return_pages();
+        std::fprintf(stderr, "fnx: async decode cache %s after %.1f ms; %d physical entries superseded, publication/cancel %.1f ms\n",
+                     enable ? "published" : "cancelled",
+                     std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - pf_[0]->decode_cache_started).count(), superseded,
+                     std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count());
+        return;
+    }
+    std::vector<unsigned> counts;
+    if (enable) counts = route_counts();
+    if (enable && env_int("FNX_PF_DECODE_CACHE_KV", 0)) {
+        if (!prompt_cache_pages_.empty()) throw std::runtime_error("decode cache already owns K/V pages");
+        const int keep = (int) env_int("FNX_PF_DECODE_CACHE_KV_KEEP_PAGES", 8192 / KVP_POS + 2);
+        if (keep < 1) throw std::runtime_error("decode cache K/V keep pages must be positive");
+        if (free_pages_.size() > (size_t) keep) {
+            const size_t n = free_pages_.size() - (size_t) keep;
+            prompt_cache_pages_.assign(free_pages_.begin(), free_pages_.begin() + n);
+            free_pages_.erase(free_pages_.begin(), free_pages_.begin() + n);
+            std::fprintf(stderr, "fnx: decode cache reserved %zu idle K/V pages, %zu pages kept free\n",
+                         prompt_cache_pages_.size(), free_pages_.size());
+        }
+    }
+    const size_t ne = (size_t) NL * NEXP;
+    for (int c = 0; c < NCARD; ++c) {
+        Pf& p = *pf_[c];
+        CardW& w = m_.cards[c];
+        ExpertCache& ec = w.ec;
+        if (!ec.n_slots || !p.stage[0] || !p.stage[1])
+            throw std::runtime_error("FNX_PF_DECODE_CACHE needs expert cache and prompt stages");
+        ckc(cudaSetDevice(p.dev), "decode cache device");
+        read_decode_cache(p, ec);
+        size_t bytes = 0;
+        if (enable) {
+            if (async) p.decode_copies.clear();
+            std::vector<int> order;
+            for (int g = 0; g < NL * NEXP; ++g)
+                if (!m_.resident[g / NEXP][g % NEXP] && p.slot_h[g] < 0) order.push_back(g);
+            auto rank = [&](int g) {
+                const LayerW& L = w.L[g / NEXP];
+                // The current prompt supplements the persisted profile; neither changes residency.
+                const double prompt = counts.size() == 2 * ne ? counts[ne + g] : 0.0;
+                return std::make_pair(prompt / (double) (L.gu_e_stride + L.down_e_stride),
+                                      m_.score.size() == ne ? m_.score[g] : 0.0);
+            };
+            std::stable_sort(order.begin(), order.end(), [&](int a, int b) { return rank(a) > rank(b); });
+            std::vector<std::pair<char*, size_t>> regions{{p.stage[0], p.stage_bytes}, {p.stage[1], p.stage_bytes}};
+            if (env_int("FNX_PF_DECODE_CACHE_WORK", 0))
+                regions.insert(regions.end(), p.decode_regions.begin(), p.decode_regions.end());
+            // Only pages removed from the allocator's free list may back experts. K/V growth
+            // reclaims them before allocation; no active sequence page is overwritten.
+            for (size_t i = 0; i < prompt_cache_pages_.size();) {
+                const int high = prompt_cache_pages_[i];
+                size_t end = i + 1;
+                while (end < prompt_cache_pages_.size() && prompt_cache_pages_[end] == prompt_cache_pages_[end - 1] - 1) ++end;
+                const int low = prompt_cache_pages_[end - 1];
+                regions.emplace_back((char*) (cb_[c]->pool + (size_t) low * cb_[c]->pg.page),
+                                     (size_t) (high - low + 1) * cb_[c]->pg.page * sizeof(uint16_t));
+                i = end;
+            }
+            std::vector<size_t> used(regions.size(), 0);
+            for (int g : order) {
+                const LayerW& L = w.L[g / NEXP];
+                const size_t gs = L.gu_e_stride, ds = L.down_e_stride;
+                const size_t span = (gs + ds + 255) & ~(size_t) 255;
+                size_t k = 0;
+                while (k < regions.size() && used[k] + span > regions[k].second) ++k;
+                if (k == regions.size()) continue;
+                char* at = regions[k].first + used[k];
+                if (async) {
+                    p.decode_copies.push_back({w.ec_host_gu[g], at, gs});
+                    p.decode_copies.push_back({w.ec_host_dn[g], at + gs, ds});
+                } else {
+                    ckc(cudaMemcpyAsync(at, w.ec_host_gu[g], gs, cudaMemcpyDefault, p.cs), "decode cache gate copy");
+                    ckc(cudaMemcpyAsync(at + gs, w.ec_host_dn[g], ds, cudaMemcpyDefault, p.cs), "decode cache down copy");
+                }
+                p.ep_hgu[g] = at;
+                p.ep_hdn[g] = at + gs;
+                // Static mode allocates ref for physical slots plus every virtual expert slot.
+                p.slot_h[g] = ec.n_slots + g;
+                p.decode_experts.push_back(g);
+                used[k] += span;
+                bytes += gs + ds;
+            }
+            if (async) {
+                p.decode_cache_pending = true;
+                p.decode_cache_started = start;
+                p.decode_error = nullptr;
+                p.decode_done.store(false, std::memory_order_relaxed);
+                p.decode_thread = std::thread([worker = &p] {
+                    Pf& p = *worker;
+                    try {
+                        ckc(cudaSetDevice(p.dev), "decode cache worker device");
+                        const auto t0 = std::chrono::steady_clock::now();
+                        for (const auto& copy : p.decode_copies)
+                            ckc(cudaMemcpyAsync(copy.dst, copy.src, copy.n, cudaMemcpyDefault, p.cs), "decode cache worker copy");
+                        const auto t1 = std::chrono::steady_clock::now();
+                        ckc(cudaStreamSynchronize(p.cs), "decode cache worker completion");
+                        std::fprintf(stderr, "fnx: async decode worker card %d: %zu copies, submit %.1f ms, drain %.1f ms\n",
+                                     p.dev, p.decode_copies.size(), std::chrono::duration<double, std::milli>(t1 - t0).count(),
+                                     std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t1).count());
+                    } catch (...) { p.decode_error = std::current_exception(); }
+                    p.decode_done.store(true, std::memory_order_release);
+                });
+                std::fprintf(stderr, "fnx: async decode cache queued %zu MiB for %zu experts on card %d\n", bytes >> 20, p.decode_experts.size(), c);
+                continue;
+            }
+            ckc(cudaStreamSynchronize(p.cs), "decode cache copies");
+            check_decode_cache(p, w);
+        } else {
+            for (int g : p.decode_experts) {
+                if (p.slot_h[g] != ec.n_slots + g)
+                    throw std::runtime_error("decode cache virtual slot changed");
+                p.ep_hgu[g] = w.ec_host_gu[g];
+                p.ep_hdn[g] = w.ec_host_dn[g];
+                p.slot_h[g] = -1;
+            }
+        }
+        write_decode_cache(p, ec);
+        if (enable)
+            std::fprintf(stderr, "fnx: prompt buffers lend %zu MiB to %zu decode experts on card %d\n", bytes >> 20, p.decode_experts.size(), c);
+        else p.decode_experts.clear();
+        p.decode_cache_ready = enable;
+    }
+    if (enable && async) {
+        std::fprintf(stderr, "fnx: async decode cache queued in %.1f ms\n",
+                     std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count());
+        return;
+    }
+    if (!enable) return_pages();
+    std::fprintf(stderr, "fnx: prompt decode cache %s in %.1f ms\n", enable ? "enabled" : "released",
+                 std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count());
+}
+#endif
+
 // the draft layer over a chunk's rows, for its state only (its K/V and QSA keys; its outputs over a prompt are never
 // read): row t's source is the chunk's final residual (p.R, as the last layer's FFN-half read leaves it), paired with
 // the token after the row. As mtp_enqueue up to its attention, every card computing every row (no sums across them)
@@ -1300,6 +1755,9 @@ void Engine::prefill_draft(int C, int set) {
 void Engine::prefill(const std::vector<int>& tokens, int after) {
     if (!pending_.empty() || !rows_pending_.lanes.empty()) throw std::runtime_error("prefill: a window is not committed");
     if (mtp_ && after < 0) throw std::runtime_error("prefill: the draft layer needs the token after the last row");
+#if FNX_CUDA_PEER
+    prefill_cache_decode(false);
+#endif
     if (pf_[0]->seq >= PF_SEQ_RESET) {
         std::fprintf(stderr, "fnx: prompt ring sequence numbers at %u: flags zeroed, numbers from 0 again\n", pf_[0]->seq);
         pf_seq_reset(0);
@@ -1309,7 +1767,7 @@ void Engine::prefill(const std::vector<int>& tokens, int after) {
     int K = PF_PASS;
     for (const Pf* p : pf_) K = std::min(K, p->pass);
     if (pass_rows_ > 0) K = std::max(1, std::min(K, pass_rows_ / pf_c_));
-    for (int k = 0; k < 2 * K; ++k)
+    auto host_set = [&](int k) {
         if (!pf_emb_[k]) {
             ckc(cudaMallocHost(&pf_emb_[k], (size_t) pf_c_ * N * sizeof(float)), "pinned emb");
             own_pinned(pf_emb_[k]);
@@ -1320,6 +1778,10 @@ void Engine::prefill(const std::vector<int>& tokens, int after) {
             ckc(cudaMallocHost(&pf_after_[k], (size_t) N * sizeof(float)), "pinned after");
             own_pinned(pf_after_[k]);
         }
+    };
+    const bool lazy_host = env_int("FNX_PF_HOST_LAZY", 0) != 0;
+    if (!lazy_host)
+        for (int k = 0; k < 2 * K; ++k) host_set(k);
     // every pass's rows embedded on the host while the cards run the pass before; passes alternate between the two
     // halves of the sets
     const int h0 = (int) history_.size();
@@ -1338,13 +1800,17 @@ void Engine::prefill(const std::vector<int>& tokens, int after) {
     // a pass takes K chunks; with the hyper-connection split a short last chunk (not a whole pf_c_ rows) is a pass of its own, so it does not keep the whole chunks
     // before it from being split
     const bool lone_tail = pf_[0]->hcs;
+    const bool merge_tail = env_int("FNX_PF_TAIL_MERGE", 0) != 0;
     const int lone_min = (int) env_int("FNX_PF_HCSPLIT_MIN", 3);   // fewer whole chunks than this: the tail stays with them (one pass, the chunks hide each other's sums)
     auto chunks_of = [&](size_t i0, int half) {
         std::vector<PfChunk> ch;
         for (size_t i = i0; i < nt && (int) ch.size() < K; i += pf_c_) {
             const size_t e = std::min(nt, i + pf_c_);
-            if (lone_tail && (int) ch.size() >= lone_min && e - i != (size_t) pf_c_) break;
-            ch.push_back({std::vector<int>(tokens.begin() + i, tokens.begin() + e), e < nt ? tokens[e] : after, half * K + (int) ch.size()});
+            if (lone_tail && (int) ch.size() >= lone_min && e - i != (size_t) pf_c_ &&
+                !(merge_tail && pf_[0]->hcs_mode == 2 && e - i >= 512)) break;
+            const int set = half * K + (int) ch.size();
+            if (lazy_host) host_set(set);
+            ch.push_back({std::vector<int>(tokens.begin() + i, tokens.begin() + e), e < nt ? tokens[e] : after, set});
         }
         return ch;
     };
@@ -1411,7 +1877,7 @@ void Engine::prefill_pass(const std::vector<PfChunk>& chunks, bool staging, cons
         }
     }
     auto each = [&](auto&& f) {
-#if FNX_HIP
+#if FNX_HIP || FNX_CUDA_PEER
         const RcclApi* rc = rccl_on_ ? &static_cast<RcclState*>(rccl_.get())->api : nullptr;
         if (rc) rc->GroupStart();
 #endif
@@ -1419,7 +1885,7 @@ void Engine::prefill_pass(const std::vector<PfChunk>& chunks, bool staging, cons
             ckc(cudaSetDevice(cb_[c]->dev), "set");
             f(c, *cb_[c], m_.cards[c], *pf_[c]);
         }
-#if FNX_HIP
+#if FNX_HIP || FNX_CUDA_PEER
         if (rc) {   // the group's collectives launch now; what follows each sum on its stream is enqueued after them
             const int r = rc->GroupEnd();
             if (r != RCCL_SUCCESS) throw std::runtime_error(std::string("prefill: ncclGroupEnd: ") + rc->ErrorString(r));
@@ -1474,7 +1940,10 @@ void Engine::prefill_pass(const std::vector<PfChunk>& chunks, bool staging, cons
                 for (int e = 0; e < NEXP; ++e) {
                     const size_t i = (size_t) l * NEXP + e;
                     const int s = p.slot_h[i];
-                    if (s >= 0) {
+                    if (s >= ec.n_slots) { // immutable hot experts: virtual slots, already in VRAM
+                        p.ep_hgu[i] = w.ec_host_gu[i];
+                        p.ep_hdn[i] = w.ec_host_dn[i];
+                    } else if (s >= 0) {
                         const int q = ec.pool_of[l];
                         const char* at = ec.pool[q] + (size_t) (s - ec.s0[q]) * ec.slot_bytes[q];
                         p.ep_hgu[i] = at, p.ep_hdn[i] = at + ec.dn_off[q];

@@ -26,6 +26,18 @@
 
 namespace fnx {
 
+#if FNX_CUDA_PEER && !FNX_HIP && FNX_ARCH == 75 && !FNX_27B
+void top_tokens_dispatch_sm75(float*,int,int,int,const int*,const int*,const int*,int,const float*,float*,int*,unsigned*,void*);
+#endif
+void select_top_tokens(float* logits,int n,int T,int v0,const int* pt,const int* pc,const int* pn,int stride,
+                       const float* pp,float* values,int* indices,unsigned* error,void* stream) {
+#if FNX_CUDA_PEER && !FNX_HIP && FNX_ARCH == 75 && !FNX_27B
+    top_tokens_dispatch_sm75(logits,n,T,v0,pt,pc,pn,stride,pp,values,indices,error,stream);
+#else
+    top_tokens(logits,n,T,v0,pt,pc,pn,stride,pp,values,indices,error,stream);
+#endif
+}
+
 void ck(cudaError_t e, const char* what) {
     if (e != cudaSuccess) throw std::runtime_error(std::string(what) + ": " + cudaGetErrorString(e));
 }
@@ -436,7 +448,34 @@ std::vector<std::function<void()>> take_owned() {
 
 // every card idle, the window graphs destroyed, then what the engine made released, newest first (errors ignored: a
 // destructor must not throw, and the process may be on its way out)
+#if FNX_CUDA_PEER && !FNX_HIP && FNX_ARCH == 75 && !FNX_27B
+void hc_mma_check_report(int);
+void attn_mma_check_report(int);
+void moe_gu_sub_check_report(int);
+void topk_parallel_check_report_sm75(int);
+#endif
+void Engine::print_ple_stats() const {
+#if FNX_CUDA_PEER && !FNX_HIP && FNX_ARCH == 75 && !FNX_27B
+    if(env_int("FNX_HC_MMA",0) && env_int("FNX_HC_MMA_CHECK",0))
+        for(const CardBuf* b:cb_)hc_mma_check_report(b->dev);
+    if(env_int("FNX_ATTN_MMA",0) && env_int("FNX_ATTN_MMA_CHECK",0))
+        for(const CardBuf* b:cb_)attn_mma_check_report(b->dev);
+    if(env_int("FNX_GU_SUBWARP",0) && env_int("FNX_GU_SUBWARP_CHECK",0))
+        for(const CardBuf* b:cb_)moe_gu_sub_check_report(b->dev);
+    if(env_int("FNX_TOPK_PARALLEL",0) && env_int("FNX_TOPK_PARALLEL_CHECK",0))
+        for(const CardBuf* b:cb_)topk_parallel_check_report_sm75(b->dev);
+#endif
+    if(!ple_reader_)return;
+    const auto s=ple_reader_->snapshot();
+    std::fprintf(stderr,"fnx: PLE direct: rows %llu, row-cache hits %llu, SSD reads %llu, collect wait %.1f ms\n",
+                 (unsigned long long)s.requests,(unsigned long long)s.cache_hits,(unsigned long long)s.reads,s.wait_us/1000.0);
+}
+
 Engine::~Engine() {
+#if FNX_CUDA_PEER && !FNX_27B
+    try { prefill_cache_decode(false); }
+    catch (const std::exception& e) { std::fprintf(stderr, "fnx: release prompt decode cache: %s\n", e.what()); }
+#endif
     for (CardBuf* b : cb_) {
         cudaSetDevice(b->dev);
         cudaDeviceSynchronize();
@@ -772,7 +811,7 @@ std::vector<std::vector<std::pair<float, int>>> Engine::top_tokens(int T, const 
         ck(cudaMemcpyAsync(b.tk_pen_n, tk_.pen_n, (size_t) T * 4, cudaMemcpyHostToDevice, b.st), "penalties");
         ck(cudaMemcpyAsync(b.tk_par, tk_.par, (size_t) T * 3 * 4, cudaMemcpyHostToDevice, b.st), "penalties");
         ck(cudaMemsetAsync(b.tk_err, 0, 4, b.st), "top err");
-        fnx::top_tokens(b.head_logits, w.v1 - w.v0, T, w.v0, b.tk_pen_tok, b.tk_pen_cnt, b.tk_pen_n, stride, b.tk_par,
+        fnx::select_top_tokens(b.head_logits, w.v1 - w.v0, T, w.v0, b.tk_pen_tok, b.tk_pen_cnt, b.tk_pen_n, stride, b.tk_par,
                         b.tk_v, b.tk_i, b.tk_err, b.st);
         ck(cudaMemcpyAsync(tk_.v + (size_t) c * MAXT * TOPK_N, b.tk_v, (size_t) T * TOPK_N * 4, cudaMemcpyDeviceToHost, b.st), "top v");
         ck(cudaMemcpyAsync(tk_.i + (size_t) c * MAXT * TOPK_N, b.tk_i, (size_t) T * TOPK_N * 4, cudaMemcpyDeviceToHost, b.st), "top i");
@@ -805,6 +844,9 @@ std::vector<int> Engine::verify(const std::vector<int>& tokens) {
     if (pos_ + T > max_ctx_) throw std::runtime_error("window: context full");
     arena_churn();
     ensure_pages(pos_ + T);
+#if FNX_CUDA_PEER && !FNX_27B
+    prefill_cache_decode(true);
+#endif
     const auto t0 = std::chrono::steady_clock::now();
     if (!h_.R0) {
         h_.R0 = halloc<float>((size_t) MAXT * ROW_W);
@@ -1464,7 +1506,7 @@ int Engine::draft_rows(const std::vector<const float*>& src, int T, const std::v
         const int nv = mc.dv1 - mc.dv0, last = MTP_HEAD_EVERY_ROW ? T - 1 : 0;   // the last row's head row
         if (cands && nv > 0) {   // the last row's logits are penalized already
             ck(cudaMemsetAsync(b.mtp_tk_err, 0, 4, b.st), "draft top err");
-            fnx::top_tokens(b.mtp_logits + (size_t) last * nv, nv, 1, mc.dv0, b.mtp_zero, b.mtp_zero, b.mtp_zero, 0, b.mtp_pen_par,
+            fnx::select_top_tokens(b.mtp_logits + (size_t) last * nv, nv, 1, mc.dv0, b.mtp_zero, b.mtp_zero, b.mtp_zero, 0, b.mtp_pen_par,
                        b.mtp_tk_v, b.mtp_tk_i, b.mtp_tk_err, b.st);
         }
         ck(cudaEventRecord(b.ev1, b.st), "event");

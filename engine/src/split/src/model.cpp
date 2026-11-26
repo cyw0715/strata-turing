@@ -265,6 +265,8 @@ struct Up {
     CardW& c;
     Store* store = nullptr;               // the lab's holder: the shared memory instead of cudaMalloc / cudaHostAlloc
     std::vector<void*>* track = nullptr;  // a worker placing its experts: what it allocates (Model::free_experts)
+    const std::vector<std::vector<char>>* static_res = nullptr;
+    int static_layer = -1;
     template <typename T> T* put(const void* host, size_t bytes) {
         void* d = nullptr;
         if (store) d = store->dev(c.dev, bytes);
@@ -273,6 +275,10 @@ struct Up {
         ck(cudaMemcpy(d, host, bytes, cudaMemcpyDefault), "upload");
         c.bytes += bytes;
         return (T*) d;
+    }
+    template <typename T> void table(T*& dst, const void* host, size_t bytes) {
+        if (!dst) dst = put<T>(host, bytes);
+        else ck(cudaMemcpy((void*) dst, host, bytes, cudaMemcpyHostToDevice), "refresh expert table");
     }
     // a norm as the window reads it: exactly n floats. A tensor of another width would feed garbage rows silently;
     // the whole tensor must match, so extra rows fail too (the window never reads them)
@@ -286,7 +292,7 @@ struct Up {
     // where a tensor's routed experts are assembled: with an ExpertCache (host_of) their mapped page-locked host copy,
     // else tmp
     uint8_t* expert_buf(size_t bytes, const char** host_of, std::vector<uint8_t>& tmp) {
-        if (!host_of) {
+        if (!host_of || static_res) {
             tmp.resize(bytes);
             return tmp.data();
         }
@@ -301,6 +307,35 @@ struct Up {
     // routed experts (h from expert_buf: every expert's matrix, stride bytes apart): to VRAM at p, or with an
     // ExpertCache each one's address in host_of (the layer's row of the card's host addresses)
     void place(DW& w, const uint8_t* h, size_t bytes, size_t stride, const char** host_of) {
+        if (static_res && host_of) {
+            const auto& res = static_res->at((size_t) static_layer);
+            const size_t count = bytes / stride;
+            if (res.size() != count) throw std::runtime_error("static experts: residency shape");
+            const size_t hot = std::count(res.begin(), res.end(), (char) 1), cold = count - hot;
+            uint8_t* hp = nullptr;
+            uint8_t* dp = nullptr;
+            if (cold) {
+                // The shared cold cache copies full padded slots. A trailing
+                // zero region makes its wider reads of the last expert safe;
+                // bytes past this matrix are ignored by its quantized kernel.
+                const size_t padding = (size_t) 4 * FF_CARD_MAX * N;
+                ck(cudaHostAlloc((void**) &hp, cold * stride + padding, cudaHostAllocMapped), "static experts: cold host copy");
+                std::memset(hp + cold * stride, 0, padding);
+                ck(cudaHostGetDevicePointer((void**) &dp, hp, 0), "static experts: mapped pointer");
+                c.host_bytes += cold * stride + padding;
+            }
+            std::vector<uint8_t> packed(hot * stride);
+            size_t ih = 0, ic = 0;
+            for (size_t e = 0; e < count; ++e) {
+                if (res[e]) std::memcpy(packed.data() + ih++ * stride, h + e * stride, stride);
+                else std::memcpy(hp + ic++ * stride, h + e * stride, stride);
+            }
+            const uint8_t* gpu = hot ? put<uint8_t>(packed.data(), packed.size()) : nullptr;
+            ih = ic = 0;
+            for (size_t e = 0; e < count; ++e)
+                host_of[e] = (const char*) (res[e] ? gpu + ih++ * stride : dp + ic++ * stride);
+            return;
+        }
         if (!host_of) {
             w.p = put<uint8_t>(h, bytes);
             return;
@@ -309,6 +344,56 @@ struct Up {
         if (store) dp = (void*) h;   // the shared host memory has one address for the CPU and the cards
         else ck(cudaHostGetDevicePointer(&dp, (void*) h, 0), "place: mapped pointer");
         for (size_t e = 0; e < bytes / stride; ++e) host_of[e] = (const char*) dp + e * stride;
+    }
+    // Fixed hot experts have no RAM duplicate. Only cold experts use CLOCK slots.
+    // Virtual slot IDs >= n_slots keep hot experts out of the miss list; their
+    // reference bytes exist, but CLOCK only visits the physical [0,n_slots) range.
+    void static_cache(const std::vector<std::vector<char>>& res, const std::vector<const char*>& hgu,
+                      const std::vector<const char*>& hdn) {
+        ExpertCache& ec = c.ec;
+        ec.n_pools = 1;
+        ec.n_slots = ec.n[0] = EXPERT_WINDOW_SLOTS;
+        size_t gu_max = 0, dn_max = 0;
+        for (const LayerW& L : c.L) gu_max = std::max(gu_max, L.gu_e_stride), dn_max = std::max(dn_max, L.down_e_stride);
+        ec.dn_off[0] = gu_max;
+        ec.slot_bytes[0] = gu_max + dn_max;
+        if (!ec.pool[0]) {
+            ck(cudaMalloc((void**) &ec.pool[0], ec.n_slots * ec.slot_bytes[0]), "cold expert cache");
+            c.bytes += ec.n_slots * ec.slot_bytes[0];
+        }
+        std::vector<int> slots(hgu.size(), -1), owner;
+        std::vector<const char*> epg(hgu), epd(hdn);
+        for (size_t i = 0; i < hgu.size(); ++i) {
+            const int l = (int) i / NEXP, e = (int) i % NEXP;
+            if (res[(size_t) l][(size_t) e]) slots[i] = ec.n_slots + (int) i;
+            else if ((int) owner.size() < ec.n_slots) {
+                const int s = (int) owner.size();
+                owner.push_back((int) i);
+                slots[i] = s;
+                char* at = ec.pool[0] + s * ec.slot_bytes[0];
+                ck(cudaMemcpy(at, hgu[i], c.L[l].gu_e_stride, cudaMemcpyDefault), "cold cache: gate/up");
+                ck(cudaMemcpy(at + gu_max, hdn[i], c.L[l].down_e_stride, cudaMemcpyDefault), "cold cache: down");
+                epg[i] = at; epd[i] = at + gu_max;
+            }
+        }
+        if ((int) owner.size() != ec.n_slots) throw std::runtime_error("cold cache needs at least 320 cold experts");
+        table(ec.ep_gu, epg.data(), epg.size() * sizeof(char*));
+        table(ec.ep_dn, epd.data(), epd.size() * sizeof(char*));
+        table(ec.host_gu, hgu.data(), hgu.size() * sizeof(char*));
+        table(ec.host_dn, hdn.data(), hdn.size() * sizeof(char*));
+        table(ec.slot_of, slots.data(), slots.size() * sizeof(int));
+        table(ec.owner, owner.data(), owner.size() * sizeof(int));
+        const std::vector<unsigned char> ref(ec.n_slots + hgu.size(), 0);
+        table(ec.ref, ref.data(), ref.size());
+        const int zero[EC_POOLS] = {};
+        table(ec.hand, zero, sizeof zero);
+        table(ec.lent, zero, sizeof zero);
+        c.ec_owner0 = owner;
+        c.ec_slot0 = slots;
+        for (int l = 0; l < NL; ++l) {
+            c.L[l].gu_e.ep = ec.ep_gu + l * NEXP;
+            c.L[l].down_e.ep = ec.ep_dn + l * NEXP;
+        }
     }
     // the card's ExpertCache: a slot for each resident expert (res) in its size's pool, filled from its host copy; the
     // layers' tables. With arena_score (FNX_ARENA) the largest pool's slots go coldest first and are neither allocated
@@ -636,7 +721,11 @@ struct Up {
     }
     // per expert: every row, input blocks [b0, b1) (down), expert-major
     DW expert_cols(const Tensor& t, int b0, int b1, size_t& stride, const char** host_of = nullptr) {
-        const TypeInfo ti = block32(t);
+        const TypeInfo ti = type_info(t.type);
+        if (ti.block != 32 && ti.block != 64) throw std::runtime_error(t.name + ": expert columns need 32/64-value blocks");
+        if ((b0 * 32) % ti.block || (b1 * 32) % ti.block) throw std::runtime_error(t.name + ": expert slice splits a quant block");
+        b0 = b0 * 32 / ti.block;
+        b1 = b1 * 32 / ti.block;
         DW w;
         w.type = t.type;
         w.n_in = (b1 - b0) * ti.block;
@@ -759,6 +848,12 @@ void load_card(Stager& st, CardW& c, const std::vector<std::vector<char>>& resid
                Store* store, bool host_experts) {
     ck(cudaSetDevice(c.dev), "cudaSetDevice");
     Up up{c, store};
+    const bool fixed = env_int("FNX_STATIC_EXPERTS", 0) != 0;
+    if (fixed) {
+        if (store || arena_score || resident.empty())
+            throw std::runtime_error("FNX_STATIC_EXPERTS needs a plain load, FNX_ARENA=0 and an expert RAM budget");
+        up.static_res = &resident;
+    }
     auto L = [&](int l, const char* s) -> const Tensor& { return st.t(l, "blk." + std::to_string(l) + "." + s); };
     // recurrent channel lists: q, k for this card's key heads; v for its value heads (s * NKH + k)
     std::vector<int> qch, kch, vch, vblocks;
@@ -806,6 +901,7 @@ void load_card(Stager& st, CardW& c, const std::vector<std::vector<char>>& resid
     std::vector<const char*> hgu(host_experts ? (size_t) NL * NEXP : 0), hdn(hgu.size());   // the experts' host copies
     for (int l = 0; l < NL; ++l) {
         LayerW& w = c.L[l];
+        up.static_layer = l;
         const char** hg = host_experts ? hgu.data() + (size_t) l * NEXP : nullptr;
         const char** hd = host_experts ? hdn.data() + (size_t) l * NEXP : nullptr;
         const char* hp[2] = {"hc_attn_", "hc_ffn_"};
@@ -887,7 +983,13 @@ void load_card(Stager& st, CardW& c, const std::vector<std::vector<char>>& resid
     c.head_up = up.q8split(st.t(NL, "output_hc_up.weight"));
     c.out = up.dense(up.rows(st.t(NL, "output.weight"), range(c.v0, c.v1)));
     st.done(NL);
-    if (!resident.empty()) {   // tracked, so the engine can place them again with more in RAM (Engine: VRAM short)
+    if (fixed) {
+        c.ec_host_gu = hgu;
+        c.ec_host_dn = hdn;
+        up.static_cache(resident, hgu, hdn);
+        std::fprintf(stderr, "fnx: card %d: fixed expert placement, %zu MiB of cold host copies, %zu MiB device weights\n",
+                     c.dev, c.host_bytes >> 20, c.bytes >> 20);
+    } else if (!resident.empty()) {   // tracked, so the engine can place them again with more in RAM (Engine: VRAM short)
         const size_t before = c.bytes;
         Up ue{c, store, &c.expert_mem};
         ue.expert_cache(resident, hgu, hdn, arena_score);
@@ -1282,7 +1384,11 @@ Mtp::~Mtp() { free_mtp_cards(cards); }
 // the cards (the app's rule, strata_control/split_engine.py, refuses it earlier; this is the same check for a start that skipped the rule). The
 // server then starts the normal layer split. Q2_0 is not listed: the Gguf has already repacked it to Q4_0.
 static void check_supported(const Gguf& g) {
-    const uint32_t ok[] = {T_Q4_K, T_Q5_K, T_Q5_1, T_Q8_0, T_Q4_0, T_IQ4_NL, T_IQ4_XS, T_IQ3_S, T_IQ3_XXS, T_IQ2_S};
+    const uint32_t ok[] = {
+#if FNX_CUDA_PEER
+        T_IQ2_XXS, T_IQ2_XS, T_Q2_0,
+#endif
+        T_Q4_K, T_Q5_K, T_Q5_1, T_Q8_0, T_Q4_0, T_IQ4_NL, T_IQ4_XS, T_IQ3_S, T_IQ3_XXS, T_IQ2_S};
     for (const auto& kv : g.tensors()) {
         const std::string& n = kv.first;
         if (n.find("_exps.weight") == std::string::npos || n.find("shexp") != std::string::npos) continue;
@@ -1370,10 +1476,16 @@ Model::Model(const std::string& path, Load how, Store* store, const std::string*
         const auto t0 = std::chrono::steady_clock::now();
         // the PLE table first: the host reads about 24 scattered rows of it a token against one row of the token embedding, so when only part fits it is the part
         // that matters (measured on 2x A6000: with the unlocked pages dropped, locking the token embedding alone left prompts at 160 tokens/s, 4K, against 2,996 locked)
-        const bool all = lock_tables({ple_table, tok_embd}).empty();
-        std::fprintf(stderr, "fnx: %s and %s (%.1f GB) %s in RAM in %.1f s\n", tok_embd->name.c_str(), ple_table->name.c_str(),
-                     (tok_embd->nbytes + ple_table->nbytes) / 1e9, all ? "locked" : "read",
-                     std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count());
+        const bool direct_ple = env_int("FNX_PLE_DIRECT",0) != 0;
+        const bool all = (direct_ple ? lock_tables({tok_embd}) : lock_tables({ple_table, tok_embd})).empty();
+        if (direct_ple)
+            std::fprintf(stderr,"fnx: %s (%.1f GB) %s in RAM in %.1f s; PLE uses the direct row reader\n",
+                         tok_embd->name.c_str(),tok_embd->nbytes/1e9,all?"locked":"read",
+                         std::chrono::duration<double>(std::chrono::steady_clock::now()-t0).count());
+        else
+            std::fprintf(stderr, "fnx: %s and %s (%.1f GB) %s in RAM in %.1f s\n", tok_embd->name.c_str(), ple_table->name.c_str(),
+                         (tok_embd->nbytes + ple_table->nbytes) / 1e9, all ? "locked" : "read",
+                         std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count());
     }
     for (int64_t v : g.ia(p + "ple.layer_multipliers")) ple_mult.push_back((uint64_t) v);
     for (int64_t v : g.ia(p + "ple.head_offsets")) ple_off.push_back((uint64_t) v);
@@ -1487,7 +1599,9 @@ Model::Model(const std::string& path, Load how, Store* store, const std::string*
     if (how == Load::PLAIN) choose_residency();   // the holder leaves that to its workers: every expert to a host copy
 #endif
     const auto t0 = std::chrono::steady_clock::now();
-    Stager st(g, stage_groups(g), NCARD);
+    const int load_ahead = (int) env_int("FNX_LOAD_AHEAD", 3);
+    if (load_ahead < 1 || load_ahead > 8) throw std::runtime_error("FNX_LOAD_AHEAD: want 1..8 groups");
+    Stager st(g, stage_groups(g), NCARD, load_ahead);
     std::vector<std::thread> th;
     std::vector<std::string> errs(NCARD);
     for (int c = 0; c < NCARD; ++c)
@@ -1583,6 +1697,72 @@ void each_card(std::vector<CardW>& cards, F f) {
         if (!errs[c].empty()) throw std::runtime_error("card " + std::to_string(c) + ": " + errs[c]);
 }
 }  // namespace
+
+// Called only between replies with one lane idle. Move bytes, not numbers:
+// hot/cold swaps preserve every expert and keep captured device table addresses.
+void adapt_static_hot(Model& m, const std::vector<unsigned>& counts) {
+    if (!env_int("FNX_STATIC_ADAPT", 0)) return;
+    if (m.arena || m.resident.empty() || !env_int("FNX_STATIC_EXPERTS", 0))
+        throw std::runtime_error("FNX_STATIC_ADAPT needs fixed hot experts without an arena");
+    if (counts.size() != (size_t) 2 * NL * NEXP) throw std::runtime_error("static hot adaptation needs route counts");
+    uint64_t total = 0;
+    for (int i = 0; i < NL * NEXP; ++i) total += counts[(size_t) i];
+    if (total < (uint64_t) NL * TOPK * 128) return;
+    const auto start = std::chrono::steady_clock::now();
+    auto next = m.resident;
+    std::vector<std::vector<std::pair<int,int>>> swaps(NL);
+    int moved = 0;
+    uint64_t before_hits = 0, after_hits = 0;
+    for (int l = 0; l < NL; ++l) {
+        std::vector<int> order(NEXP), out, in;
+        int keep = 0;
+        for (int e = 0; e < NEXP; ++e) order[e] = e, keep += m.resident[l][e] != 0;
+        std::stable_sort(order.begin(),order.end(),[&](int a,int b) {
+            const unsigned ca = counts[(size_t) l*NEXP+a], cb = counts[(size_t) l*NEXP+b];
+            if (ca != cb) return ca > cb;
+            if (m.resident[l][a] != m.resident[l][b]) return m.resident[l][a] > m.resident[l][b];
+            return a < b;
+        });
+        std::fill(next[l].begin(),next[l].end(),0);
+        for (int k = 0; k < keep; ++k) next[l][order[k]] = 1;
+        for (int e = 0; e < NEXP; ++e) {
+            if (m.resident[l][e] && !next[l][e]) out.push_back(e);
+            if (!m.resident[l][e] && next[l][e]) in.push_back(e);
+            if (m.resident[l][e]) before_hits += counts[(size_t) l*NEXP+e];
+            if (next[l][e]) after_hits += counts[(size_t) l*NEXP+e];
+        }
+        if (out.size() != in.size()) throw std::runtime_error("static hot swap count");
+        for (size_t k = 0; k < out.size(); ++k) swaps[l].emplace_back(out[k],in[k]);
+        moved += (int) out.size();
+    }
+    if (!moved) return;
+    each_card(m.cards,[&](CardW& c) {
+        ck(cudaDeviceSynchronize(),"hot adaptation: idle device");
+        std::vector<uint8_t> saved;
+        for (int l = 0; l < NL; ++l) {
+            const size_t gs = c.L[l].gu_e_stride, ds = c.L[l].down_e_stride;
+            saved.resize(gs+ds);
+            for (auto pair : swaps[l]) {
+                const size_t old = (size_t) l*NEXP+pair.first, fresh = (size_t) l*NEXP+pair.second;
+                const char *hg=c.ec_host_gu[old], *hd=c.ec_host_dn[old], *cg=c.ec_host_gu[fresh], *cd=c.ec_host_dn[fresh];
+                ck(cudaMemcpy(saved.data(),cg,gs,cudaMemcpyDefault),"save cold gate/up");
+                ck(cudaMemcpy(saved.data()+gs,cd,ds,cudaMemcpyDefault),"save cold down");
+                ck(cudaMemcpy((void*)cg,hg,gs,cudaMemcpyDefault),"evict hot gate/up");
+                ck(cudaMemcpy((void*)cd,hd,ds,cudaMemcpyDefault),"evict hot down");
+                ck(cudaMemcpy((void*)hg,saved.data(),gs,cudaMemcpyDefault),"promote cold gate/up");
+                ck(cudaMemcpy((void*)hd,saved.data()+gs,ds,cudaMemcpyDefault),"promote cold down");
+                std::swap(c.ec_host_gu[old],c.ec_host_gu[fresh]);
+                std::swap(c.ec_host_dn[old],c.ec_host_dn[fresh]);
+            }
+        }
+        Up up{c};
+        up.static_cache(next,c.ec_host_gu,c.ec_host_dn);
+    });
+    m.resident = std::move(next);
+    std::fprintf(stderr,"fnx: adapted %d hot experts/layer slices in %.1f ms; observed decode hot share %.2f%% -> %.2f%%\n",
+                 moved,std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count(),
+                 100.0*before_hits/total,100.0*after_hits/total);
+}
 
 void Model::place_experts() {
     choose_residency();
