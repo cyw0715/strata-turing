@@ -1,0 +1,92 @@
+{
+  "checked_at": "2026-11-26T12:08:54.850522+08:00",
+  "passed": true,
+  "vision_mode": "cpu",
+  "vision_max_image_tokens": 300,
+  "cases": [
+    {
+      "case": "image_a_ocr_shapes",
+      "passed": true,
+      "checks": {
+        "ocr": true,
+        "colors": true,
+        "shapes": true
+      },
+      "response": "{\n  \"text\": \"TEST 4729\",\n  \"left\": \"blue circle\",\n  \"right\": \"red square\"\n}",
+      "usage": {
+        "prompt_tokens": 240,
+        "completion_tokens": 35,
+        "total_tokens": 275,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "finish_reason": "stop",
+      "sha256": "02e64a18a73b26d0ab115d5706767d85cd0fac18b25227d462fb97aa08d36399",
+      "elapsed_s": 11.848
+    },
+    {
+      "case": "image_b_ocr_shapes",
+      "passed": true,
+      "checks": {
+        "ocr": true,
+        "colors": true,
+        "shapes": true
+      },
+      "response": "{\n    \"text\": \"TEST 8361\",\n    \"left\": \"green triangle\",\n    \"right\": \"yellow circle\"\n}",
+      "usage": {
+        "prompt_tokens": 240,
+        "completion_tokens": 35,
+        "total_tokens": 275,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "finish_reason": "stop",
+      "sha256": "310459469eb39ffeed7278d5e08af72fbd9cc8663a07f47cd6d3239a12c00fa1",
+      "elapsed_s": 8.378
+    },
+    {
+      "case": "two_images_order",
+      "passed": true,
+      "checks": {
+        "both_ocr_codes": true,
+        "correct_order": true
+      },
+      "response": "TEST 8361\nTEST 4729",
+      "usage": {
+        "prompt_tokens": 427,
+        "completion_tokens": 14,
+        "total_tokens": 441,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "finish_reason": "stop",
+      "sha256": "558511e9d32d37b77aeb1cbda59514034a3c983feb84f083b8c10cebd3b9d9cd",
+      "elapsed_s": 5.367
+    },
+    {
+      "case": "text_after_images",
+      "passed": true,
+      "checks": {
+        "arithmetic": true
+      },
+      "response": "408",
+      "usage": {
+        "prompt_tokens": 27,
+        "completion_tokens": 4,
+        "total_tokens": 31,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "finish_reason": "stop",
+      "sha256": "e6f47e008cc58b38596e6fdf2f50a0fea93fd10543e652522aeab3aa71355719",
+      "elapsed_s": 1.282
+    }
+  ],
+  "health_loaded": true,
+  "health_model_matches": true,
+  "engine_pid_unchanged": true
+}

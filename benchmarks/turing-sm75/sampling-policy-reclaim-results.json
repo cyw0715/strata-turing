@@ -1,0 +1,91 @@
+{
+  "passed": true,
+  "trial": "trial-20261126-110721",
+  "binary_sha256": "7fc367e26f9f04d6c61217e9fa682d9c0dbfabc9a396bd5025c2a8053fd580ae",
+  "context": 262144,
+  "growth_positions": [
+    41280
+  ],
+  "payload_byte_checks": [
+    {
+      "experts": 3849,
+      "device": 0
+    },
+    {
+      "experts": 3849,
+      "device": 1
+    },
+    {
+      "experts": 1075,
+      "device": 0
+    },
+    {
+      "experts": 1075,
+      "device": 1
+    },
+    {
+      "experts": 5921,
+      "device": 0
+    },
+    {
+      "experts": 5921,
+      "device": 1
+    },
+    {
+      "experts": 5833,
+      "device": 0
+    },
+    {
+      "experts": 5833,
+      "device": 1
+    },
+    {
+      "experts": 1749,
+      "device": 0
+    },
+    {
+      "experts": 1749,
+      "device": 1
+    }
+  ],
+  "returned_pages_evidence": [
+    "fnx: demand cache returned 1280 K/V pages",
+    "fnx: demand cache returned 1258 K/V pages",
+    "fnx: demand cache returned 1152 K/V pages",
+    "fnx: demand cache returned 1107 K/V pages",
+    "fnx: demand cache returned 1280 K/V pages"
+  ],
+  "growth_measurement": {
+    "label": "tp-stress-32k10240",
+    "case": "bench32768",
+    "wall_s": 115.104,
+    "first_visible_s": 17.710912761976942,
+    "usage": {
+      "prompt_tokens": 32768,
+      "completion_tokens": 10240,
+      "total_tokens": 43008,
+      "prompt_tokens_details": {
+        "cached_tokens": 0
+      }
+    },
+    "timings": {
+      "cache_n": 0,
+      "prompt_n": 32768,
+      "prompt_ms": 17569.9,
+      "prompt_per_token_ms": 0.536,
+      "prompt_per_second": 1865.0,
+      "predicted_n": 10240,
+      "predicted_ms": 97406.9,
+      "predicted_per_token_ms": 9.512,
+      "predicted_per_second": 105.1,
+      "draft_n": 10910,
+      "draft_n_accepted": 5751
+    },
+    "finish": "length",
+    "visible_chars": 58136,
+    "sha256": "1b1feb5af8cd04e9d0b77715dd6da048c7dcf6fc95f3ddafb8dcd5e1ba5f311e"
+  },
+  "post_growth_reset_completed": true,
+  "weight_precision_changed": false,
+  "performance_acceptance": false
+}

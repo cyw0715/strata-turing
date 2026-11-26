@@ -1,0 +1,21 @@
+{
+  "upstream_commit": "2e87c08db18aa4577c22fd623d6ba53252719d63",
+  "engine_commit": "a8c592f911114c302e3001209e7dbd84df6e4c68",
+  "accepted_source_patch_sha256": "eb0c4dc1a5fb392fcffe472a75c380962a15041c04d88f69dd96cb05adba3870",
+  "tested_binary_sha256": "7fc367e26f9f04d6c61217e9fa682d9c0dbfabc9a396bd5025c2a8053fd580ae",
+  "build_parallelism": {
+    "ninja_jobs": 4,
+    "nvcc_split_compile": 2
+  },
+  "validated_backend": "Linux CUDA SM75, two GPUs",
+  "hardware": "2 x RTX 2080 Ti, 22 GiB VRAM per card, NVLink; 32 GiB host RAM",
+  "evidence_redactions": [
+    "absolute host paths",
+    "controller snapshots",
+    "API keys",
+    "GPU UUIDs",
+    "process IDs",
+    "wall-clock GPU sample timestamps"
+  ],
+  "historical_prompt_fixture": "Original prompt source is not bundled; benchmark.py accepts --source."
+}

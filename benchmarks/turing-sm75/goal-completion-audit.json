@@ -1,0 +1,109 @@
+{
+  "passed": true,
+  "binary_sha256": "7fc367e26f9f04d6c61217e9fa682d9c0dbfabc9a396bd5025c2a8053fd580ae",
+  "context_limit": 262144,
+  "weight_precision_changed": false,
+  "same_native_and_drafter_files": true,
+  "target_sampling_config_preserved": true,
+  "proposal_flags": {
+    "row_cost_ms": "2.0",
+    "q_power": "0.5"
+  },
+  "paired_checks": [
+    {
+      "trial": "trial-20261126-104937",
+      "tp_decode_tps": 110.38318812302768,
+      "pp_decode_tps": 71.39918699753868,
+      "decode_ratio": 1.5460006306070806,
+      "prefill_ratio": 0.9811562468255132,
+      "output_sha256": "30e8ed5723ef80282c866ba95635c8054b25f5f3e7d96a58f4b745ebbc451645",
+      "prompt_tokens": 32768,
+      "output_tokens": 4096,
+      "cached_tokens": 0
+    },
+    {
+      "trial": "trial-20261126-105534",
+      "tp_decode_tps": 110.4016344616977,
+      "pp_decode_tps": 73.4945812100768,
+      "decode_ratio": 1.502173801713705,
+      "prefill_ratio": 0.9751383854561801,
+      "output_sha256": "30e8ed5723ef80282c866ba95635c8054b25f5f3e7d96a58f4b745ebbc451645",
+      "prompt_tokens": 32768,
+      "output_tokens": 4096,
+      "cached_tokens": 0
+    },
+    {
+      "trial": "trial-20261126-110128",
+      "tp_decode_tps": 110.58464612103295,
+      "pp_decode_tps": 71.81303364482704,
+      "decode_ratio": 1.5398965968763076,
+      "prefill_ratio": 0.9796911468128979,
+      "output_sha256": "30e8ed5723ef80282c866ba95635c8054b25f5f3e7d96a58f4b745ebbc451645",
+      "prompt_tokens": 32768,
+      "output_tokens": 4096,
+      "cached_tokens": 0
+    }
+  ],
+  "minimum_decode_ratio": 1.502173801713705,
+  "minimum_prefill_ratio": 0.9751383854561801,
+  "reclamation": {
+    "trial": "trial-20261126-110721",
+    "growth_positions": [
+      41280
+    ],
+    "payload_checks": [
+      {
+        "experts": 3849,
+        "device": 0
+      },
+      {
+        "experts": 3849,
+        "device": 1
+      },
+      {
+        "experts": 1075,
+        "device": 0
+      },
+      {
+        "experts": 1075,
+        "device": 1
+      },
+      {
+        "experts": 5921,
+        "device": 0
+      },
+      {
+        "experts": 5921,
+        "device": 1
+      },
+      {
+        "experts": 5833,
+        "device": 0
+      },
+      {
+        "experts": 5833,
+        "device": 1
+      },
+      {
+        "experts": 1749,
+        "device": 0
+      },
+      {
+        "experts": 1749,
+        "device": 1
+      }
+    ],
+    "returned_pages": [
+      "fnx: demand cache returned 1280 K/V pages",
+      "fnx: demand cache returned 1258 K/V pages",
+      "fnx: demand cache returned 1152 K/V pages",
+      "fnx: demand cache returned 1107 K/V pages",
+      "fnx: demand cache returned 1280 K/V pages"
+    ],
+    "long_output_tokens": 10240,
+    "post_growth_reset_output_tokens": 64
+  },
+  "numerical_validation_trial": "trial-20261126-111303",
+  "sampling_law_cases": 6000,
+  "stale_q_negative_controls_detected": 4925
+}

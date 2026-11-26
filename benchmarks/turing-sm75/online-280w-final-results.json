@@ -1,0 +1,181 @@
+{
+  "passed": true,
+  "checked_at": "2026-11-26T12:18:42.838068+08:00",
+  "measurement": {
+    "label": "online-280w-32k4k",
+    "case": "bench32768",
+    "wall_s": 54.636,
+    "first_visible_s": 17.305127201019786,
+    "usage": {
+      "prompt_tokens": 32768,
+      "completion_tokens": 4096,
+      "total_tokens": 36864,
+      "prompt_tokens_details": {
+        "cached_tokens": 0
+      }
+    },
+    "timings": {
+      "cache_n": 0,
+      "prompt_n": 32768,
+      "prompt_ms": 17171.7,
+      "prompt_per_token_ms": 0.524,
+      "prompt_per_second": 1908.3,
+      "predicted_n": 4096,
+      "predicted_ms": 37345.6,
+      "predicted_per_token_ms": 9.118,
+      "predicted_per_second": 109.7,
+      "draft_n": 4323,
+      "draft_n_accepted": 2296
+    },
+    "finish": "length",
+    "visible_chars": 22856,
+    "sha256": "30e8ed5723ef80282c866ba95635c8054b25f5f3e7d96a58f4b745ebbc451645"
+  },
+  "rates": {
+    "prefill_tokens_per_second": 1908.2560259030847,
+    "decode_tokens_per_second": 109.67824857546806
+  },
+  "telemetry": {
+    "prefill": {
+      "0": {
+        "samples": 33,
+        "power.draw": {
+          "min": 81.92,
+          "mean": 237.89515151515153,
+          "max": 294.45
+        },
+        "temperature.gpu": {
+          "min": 40.0,
+          "mean": 48.81818181818182,
+          "max": 53.0
+        },
+        "utilization.gpu": {
+          "min": 20.0,
+          "mean": 91.33333333333333,
+          "max": 100.0
+        },
+        "clocks.sm": {
+          "min": 1695.0,
+          "mean": 1805.0,
+          "max": 1860.0
+        },
+        "clocks.mem": {
+          "min": 6800.0,
+          "mean": 6800.0,
+          "max": 6800.0
+        },
+        "clocks_event_reasons.sw_power_cap.active_samples": 20,
+        "clocks_event_reasons.hw_thermal_slowdown.active_samples": 0,
+        "clocks_event_reasons.sw_thermal_slowdown.active_samples": 0
+      },
+      "1": {
+        "samples": 33,
+        "power.draw": {
+          "min": 98.02,
+          "mean": 244.9151515151515,
+          "max": 301.58
+        },
+        "temperature.gpu": {
+          "min": 38.0,
+          "mean": 46.121212121212125,
+          "max": 50.0
+        },
+        "utilization.gpu": {
+          "min": 0.0,
+          "mean": 91.48484848484848,
+          "max": 100.0
+        },
+        "clocks.sm": {
+          "min": 1725.0,
+          "mean": 1845.909090909091,
+          "max": 1920.0
+        },
+        "clocks.mem": {
+          "min": 6800.0,
+          "mean": 6800.0,
+          "max": 6800.0
+        },
+        "clocks_event_reasons.sw_power_cap.active_samples": 24,
+        "clocks_event_reasons.hw_thermal_slowdown.active_samples": 0,
+        "clocks_event_reasons.sw_thermal_slowdown.active_samples": 0
+      }
+    },
+    "decode": {
+      "0": {
+        "samples": 72,
+        "power.draw": {
+          "min": 166.77,
+          "mean": 222.50708333333333,
+          "max": 237.65
+        },
+        "temperature.gpu": {
+          "min": 51.0,
+          "mean": 54.90277777777778,
+          "max": 58.0
+        },
+        "utilization.gpu": {
+          "min": 95.0,
+          "mean": 96.25,
+          "max": 99.0
+        },
+        "clocks.sm": {
+          "min": 1845.0,
+          "mean": 1845.0,
+          "max": 1845.0
+        },
+        "clocks.mem": {
+          "min": 6800.0,
+          "mean": 6800.0,
+          "max": 6800.0
+        },
+        "clocks_event_reasons.sw_power_cap.active_samples": 0,
+        "clocks_event_reasons.hw_thermal_slowdown.active_samples": 0,
+        "clocks_event_reasons.sw_thermal_slowdown.active_samples": 0
+      },
+      "1": {
+        "samples": 72,
+        "power.draw": {
+          "min": 191.72,
+          "mean": 241.50125,
+          "max": 257.35
+        },
+        "temperature.gpu": {
+          "min": 48.0,
+          "mean": 51.30555555555556,
+          "max": 53.0
+        },
+        "utilization.gpu": {
+          "min": 95.0,
+          "mean": 96.29166666666667,
+          "max": 99.0
+        },
+        "clocks.sm": {
+          "min": 1890.0,
+          "mean": 1897.0833333333333,
+          "max": 1905.0
+        },
+        "clocks.mem": {
+          "min": 6800.0,
+          "mean": 6800.0,
+          "max": 6800.0
+        },
+        "clocks_event_reasons.sw_power_cap.active_samples": 2,
+        "clocks_event_reasons.hw_thermal_slowdown.active_samples": 0,
+        "clocks_event_reasons.sw_thermal_slowdown.active_samples": 0
+      }
+    }
+  },
+  "historical_comparison": {
+    "comparison_type": "historical_250w_acceptance_not_a_fresh_pair",
+    "previous_decode_tokens_per_second": 110.38318812302768,
+    "previous_prefill_tokens_per_second": 1849.2725487318983,
+    "same_4k_output": true,
+    "decode_ratio": 0.9936137054967653,
+    "prefill_ratio": 1.0318955024837377
+  },
+  "telemetry_phase_note": "500ms samples, phases split at first visible HTTP token; setup samples excluded",
+  "power_limits_w": [
+    280,
+    280
+  ]
+}

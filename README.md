@@ -1,3 +1,17 @@
+# strata-turing
+
+A fork of [Niko1221/Strata](https://github.com/Niko1221/Strata) for **two RTX 2080 Ti / Turing SM75 GPUs with NVLink**. It adds opt-in expert tensor parallelism, CUDA peer transport, and SM75 kernel/cache optimizations for Qwen3.8-Flash-Next. The tested cards have **22 GiB VRAM each**.
+
+在固定 **32K 输入 / 4K 输出、缓存命中 0** 的三轮配对验收中，decode 达到 **110.4–110.6 tok/s**，相对同轮原版层切分提高 **50.22%–54.60%**；prefill 保留原版的 **97.51%–98.12%**。权重精度与目标采样配置保持一致，MTP 草稿调度允许生成不同文本。以上结果适用于本次双 2080 Ti 22GB / NVLink 配置。
+
+- [构建、启用参数与验证范围 / Build and usage](docs/TURING.md)
+- [逐轮测试证据 / Measurements](benchmarks/turing-sm75/README.md)
+- [已验收环境参数 / Environment preset](presets/turing-dual-2080ti.json)
+
+The optimized engine is built from this branch. The upstream installers and release links below install upstream Strata. This fork's validated scope is Linux / CUDA / SM75 / two GPUs; other backends have not been built or validated for these changes. The upstream MIT license and third-party notices are retained.
+
+---
+
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="app/host/public/brand/strata-lockup-dark.svg">

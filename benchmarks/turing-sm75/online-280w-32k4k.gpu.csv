@@ -1,0 +1,219 @@
+seconds_since_start,phase,index,power.limit,power.draw,temperature.gpu,utilization.gpu,clocks.sm,clocks.mem,pstate,clocks_event_reasons.sw_power_cap,clocks_event_reasons.hw_thermal_slowdown,clocks_event_reasons.sw_thermal_slowdown
+0.0,setup,0,280.00,82.37,41,96,1860,6800,P2,Not Active,Not Active,Not Active
+0.007541,setup,1,280.00,99.00,39,96,1920,6800,P2,Not Active,Not Active,Not Active
+0.514914,setup,0,280.00,82.33,41,24,1860,6800,P2,Not Active,Not Active,Not Active
+0.523175,setup,1,280.00,98.38,38,45,1920,6800,P2,Not Active,Not Active,Not Active
+1.045036,setup,0,280.00,124.14,42,24,1860,6800,P2,Not Active,Not Active,Not Active
+1.080271,setup,1,280.00,146.24,40,45,1920,6800,P2,Not Active,Not Active,Not Active
+1.611633,setup,0,280.00,123.20,42,74,1860,6800,P2,Not Active,Not Active,Not Active
+1.637732,setup,1,280.00,143.90,40,52,1920,6800,P2,Not Active,Not Active,Not Active
+2.144515,prefill,0,280.00,82.28,41,74,1860,6800,P2,Not Active,Not Active,Not Active
+2.151848,prefill,1,280.00,98.75,39,72,1920,6800,P2,Not Active,Not Active,Not Active
+2.660308,prefill,0,280.00,81.92,40,50,1860,6800,P2,Not Active,Not Active,Not Active
+2.666452,prefill,1,280.00,98.02,38,72,1920,6800,P2,Not Active,Not Active,Not Active
+3.175901,prefill,0,280.00,82.11,40,50,1860,6800,P2,Not Active,Not Active,Not Active
+3.190421,prefill,1,280.00,98.79,38,0,1920,6800,P2,Not Active,Not Active,Not Active
+3.69856,prefill,0,280.00,224.63,45,20,1860,6800,P2,Not Active,Not Active,Not Active
+3.711113,prefill,1,280.00,249.00,43,0,1920,6800,P2,Not Active,Not Active,Not Active
+4.260718,prefill,0,280.00,207.13,45,20,1860,6800,P2,Not Active,Not Active,Not Active
+4.271919,prefill,1,280.00,183.65,43,97,1920,6800,P2,Not Active,Not Active,Not Active
+4.783123,prefill,0,280.00,229.29,47,100,1860,6800,P2,Active,Not Active,Not Active
+4.798435,prefill,1,280.00,235.81,44,97,1905,6800,P2,Active,Not Active,Not Active
+5.309589,prefill,0,280.00,246.25,47,100,1860,6800,P2,Active,Not Active,Not Active
+5.32094,prefill,1,280.00,244.15,45,99,1905,6800,P2,Active,Not Active,Not Active
+5.838109,prefill,0,280.00,230.89,48,100,1800,6800,P2,Active,Not Active,Not Active
+5.851084,prefill,1,280.00,252.48,46,99,1770,6800,P2,Active,Not Active,Not Active
+6.361885,prefill,0,280.00,261.92,49,100,1815,6800,P2,Active,Not Active,Not Active
+6.376868,prefill,1,280.00,240.85,46,99,1770,6800,P2,Active,Not Active,Not Active
+6.885817,prefill,0,280.00,218.76,48,100,1860,6800,P2,Not Active,Not Active,Not Active
+6.897365,prefill,1,280.00,242.34,46,99,1920,6800,P2,Not Active,Not Active,Not Active
+7.468281,prefill,0,280.00,279.01,49,100,1740,6800,P2,Active,Not Active,Not Active
+7.510677,prefill,1,280.00,298.02,45,99,1770,6800,P2,Active,Not Active,Not Active
+8.019809,prefill,0,280.00,290.85,49,100,1770,6800,P2,Active,Not Active,Not Active
+8.033436,prefill,1,280.00,285.13,45,99,1800,6800,P2,Active,Not Active,Not Active
+8.544237,prefill,0,280.00,292.81,48,100,1845,6800,P2,Not Active,Not Active,Not Active
+8.555712,prefill,1,280.00,268.99,46,100,1890,6800,P2,Active,Not Active,Not Active
+9.067854,prefill,0,280.00,289.54,48,100,1830,6800,P2,Active,Not Active,Not Active
+9.081278,prefill,1,280.00,294.82,46,100,1860,6800,P2,Active,Not Active,Not Active
+9.589335,prefill,0,280.00,223.81,49,100,1845,6800,P2,Not Active,Not Active,Not Active
+9.596611,prefill,1,280.00,252.04,47,100,1905,6800,P2,Not Active,Not Active,Not Active
+10.105899,prefill,0,280.00,271.82,48,100,1815,6800,P2,Active,Not Active,Not Active
+10.115509,prefill,1,280.00,227.16,46,100,1890,6800,P2,Active,Not Active,Not Active
+10.62757,prefill,0,280.00,290.83,50,100,1740,6800,P2,Active,Not Active,Not Active
+10.640039,prefill,1,280.00,285.41,47,99,1785,6800,P2,Active,Not Active,Not Active
+11.148314,prefill,0,280.00,294.45,50,100,1785,6800,P2,Active,Not Active,Not Active
+11.159666,prefill,1,280.00,273.87,46,99,1785,6800,P2,Active,Not Active,Not Active
+11.673464,prefill,0,280.00,290.57,51,100,1740,6800,P2,Active,Not Active,Not Active
+11.685808,prefill,1,280.00,295.81,47,99,1770,6800,P2,Active,Not Active,Not Active
+12.195508,prefill,0,280.00,227.37,50,100,1845,6800,P2,Not Active,Not Active,Not Active
+12.203053,prefill,1,280.00,246.59,48,99,1905,6800,P2,Active,Not Active,Not Active
+12.713183,prefill,0,280.00,283.66,51,100,1725,6800,P2,Active,Not Active,Not Active
+12.72622,prefill,1,280.00,301.58,48,99,1740,6800,P2,Active,Not Active,Not Active
+13.235399,prefill,0,280.00,288.74,51,100,1695,6800,P2,Active,Not Active,Not Active
+13.24492,prefill,1,280.00,300.21,48,100,1755,6800,P2,Active,Not Active,Not Active
+13.75343,prefill,0,280.00,249.39,51,100,1725,6800,P2,Active,Not Active,Not Active
+13.765497,prefill,1,280.00,297.98,49,100,1725,6800,P2,Active,Not Active,Not Active
+14.274348,prefill,0,280.00,177.06,51,100,1845,6800,P2,Active,Not Active,Not Active
+14.284305,prefill,1,280.00,251.05,48,99,1890,6800,P2,Active,Not Active,Not Active
+14.795606,prefill,0,280.00,273.55,51,100,1845,6800,P2,Not Active,Not Active,Not Active
+14.804542,prefill,1,280.00,226.55,47,99,1905,6800,P2,Not Active,Not Active,Not Active
+15.314303,prefill,0,280.00,277.13,51,100,1845,6800,P2,Not Active,Not Active,Not Active
+15.325875,prefill,1,280.00,224.13,48,99,1905,6800,P2,Active,Not Active,Not Active
+15.834194,prefill,0,280.00,257.19,51,100,1755,6800,P2,Active,Not Active,Not Active
+15.842099,prefill,1,280.00,295.73,48,99,1830,6800,P2,Active,Not Active,Not Active
+16.353309,prefill,0,280.00,224.01,51,100,1845,6800,P2,Not Active,Not Active,Not Active
+16.361446,prefill,1,280.00,241.40,49,100,1905,6800,P2,Active,Not Active,Not Active
+16.874055,prefill,0,280.00,291.51,52,100,1725,6800,P2,Active,Not Active,Not Active
+16.890074,prefill,1,280.00,277.26,49,100,1755,6800,P2,Active,Not Active,Not Active
+17.405607,prefill,0,280.00,263.49,53,100,1695,6800,P2,Active,Not Active,Not Active
+17.414037,prefill,1,280.00,296.34,49,99,1755,6800,P2,Active,Not Active,Not Active
+17.929653,prefill,0,280.00,232.54,52,100,1725,6800,P2,Active,Not Active,Not Active
+17.939154,prefill,1,280.00,263.93,49,99,1725,6800,P2,Active,Not Active,Not Active
+18.44949,prefill,0,280.00,194.35,52,100,1845,6800,P2,Active,Not Active,Not Active
+18.461432,prefill,1,280.00,202.01,49,99,1890,6800,P2,Active,Not Active,Not Active
+18.972018,prefill,0,280.00,221.68,52,100,1845,6800,P2,Not Active,Not Active,Not Active
+18.981581,prefill,1,280.00,232.35,50,99,1905,6800,P2,Not Active,Not Active,Not Active
+19.494018,decode,0,280.00,166.77,51,99,1845,6800,P2,Not Active,Not Active,Not Active
+19.505102,decode,1,280.00,191.72,48,99,1905,6800,P2,Not Active,Not Active,Not Active
+20.015797,decode,0,280.00,199.65,51,99,1845,6800,P2,Not Active,Not Active,Not Active
+20.028496,decode,1,280.00,212.20,48,99,1905,6800,P2,Not Active,Not Active,Not Active
+20.539869,decode,0,280.00,214.44,52,97,1845,6800,P2,Not Active,Not Active,Not Active
+20.549753,decode,1,280.00,235.03,49,96,1905,6800,P2,Not Active,Not Active,Not Active
+21.063294,decode,0,280.00,212.93,51,97,1845,6800,P2,Not Active,Not Active,Not Active
+21.073627,decode,1,280.00,215.52,48,96,1905,6800,P2,Not Active,Not Active,Not Active
+21.58609,decode,0,280.00,199.87,51,96,1845,6800,P2,Not Active,Not Active,Not Active
+21.597771,decode,1,280.00,237.92,48,96,1905,6800,P2,Not Active,Not Active,Not Active
+22.109223,decode,0,280.00,213.12,52,96,1845,6800,P2,Not Active,Not Active,Not Active
+22.118577,decode,1,280.00,231.96,49,96,1905,6800,P2,Not Active,Not Active,Not Active
+22.630449,decode,0,280.00,184.67,52,96,1845,6800,P2,Not Active,Not Active,Not Active
+22.640733,decode,1,280.00,211.59,49,96,1905,6800,P2,Not Active,Not Active,Not Active
+23.152128,decode,0,280.00,185.37,52,96,1845,6800,P2,Not Active,Not Active,Not Active
+23.164489,decode,1,280.00,219.24,49,96,1905,6800,P2,Not Active,Not Active,Not Active
+23.675729,decode,0,280.00,220.00,52,95,1845,6800,P2,Not Active,Not Active,Not Active
+23.688025,decode,1,280.00,242.78,49,95,1905,6800,P2,Not Active,Not Active,Not Active
+24.198269,decode,0,280.00,218.07,52,95,1845,6800,P2,Not Active,Not Active,Not Active
+24.212693,decode,1,280.00,238.60,49,95,1905,6800,P2,Not Active,Not Active,Not Active
+24.722536,decode,0,280.00,219.15,52,95,1845,6800,P2,Not Active,Not Active,Not Active
+24.731551,decode,1,280.00,241.39,50,95,1905,6800,P2,Not Active,Not Active,Not Active
+25.242379,decode,0,280.00,222.15,53,95,1845,6800,P2,Not Active,Not Active,Not Active
+25.253119,decode,1,280.00,242.00,50,95,1905,6800,P2,Not Active,Not Active,Not Active
+25.764039,decode,0,280.00,215.17,53,95,1845,6800,P2,Not Active,Not Active,Not Active
+25.776714,decode,1,280.00,239.41,50,95,1905,6800,P2,Not Active,Not Active,Not Active
+26.286641,decode,0,280.00,215.41,53,95,1845,6800,P2,Not Active,Not Active,Not Active
+26.299435,decode,1,280.00,243.97,50,96,1905,6800,P2,Not Active,Not Active,Not Active
+26.811224,decode,0,280.00,222.65,53,96,1845,6800,P2,Not Active,Not Active,Not Active
+26.823114,decode,1,280.00,242.13,50,96,1905,6800,P2,Not Active,Not Active,Not Active
+27.333956,decode,0,280.00,220.40,53,96,1845,6800,P2,Not Active,Not Active,Not Active
+27.346007,decode,1,280.00,245.23,50,95,1905,6800,P2,Not Active,Not Active,Not Active
+27.858051,decode,0,280.00,215.53,53,96,1845,6800,P2,Not Active,Not Active,Not Active
+27.867698,decode,1,280.00,240.01,50,95,1905,6800,P2,Not Active,Not Active,Not Active
+28.378685,decode,0,280.00,219.68,53,96,1845,6800,P2,Not Active,Not Active,Not Active
+28.391665,decode,1,280.00,240.31,50,96,1905,6800,P2,Not Active,Not Active,Not Active
+28.901913,decode,0,280.00,219.70,53,96,1845,6800,P2,Not Active,Not Active,Not Active
+28.91557,decode,1,280.00,242.00,50,96,1905,6800,P2,Not Active,Not Active,Not Active
+29.42579,decode,0,280.00,222.12,53,96,1845,6800,P2,Not Active,Not Active,Not Active
+29.439466,decode,1,280.00,241.69,50,96,1905,6800,P2,Not Active,Not Active,Not Active
+29.949597,decode,0,280.00,225.80,54,96,1845,6800,P2,Not Active,Not Active,Not Active
+29.961622,decode,1,280.00,246.01,51,96,1905,6800,P2,Not Active,Not Active,Not Active
+30.472014,decode,0,280.00,224.99,54,96,1845,6800,P2,Not Active,Not Active,Not Active
+30.483326,decode,1,280.00,243.12,51,96,1905,6800,P2,Not Active,Not Active,Not Active
+30.993464,decode,0,280.00,223.82,54,96,1845,6800,P2,Not Active,Not Active,Not Active
+31.004605,decode,1,280.00,242.32,51,96,1905,6800,P2,Not Active,Not Active,Not Active
+31.515177,decode,0,280.00,218.62,54,96,1845,6800,P2,Not Active,Not Active,Not Active
+31.526531,decode,1,280.00,240.81,51,96,1905,6800,P2,Not Active,Not Active,Not Active
+32.036448,decode,0,280.00,225.18,54,96,1845,6800,P2,Not Active,Not Active,Not Active
+32.046305,decode,1,280.00,247.19,51,96,1905,6800,P2,Active,Not Active,Not Active
+32.561465,decode,0,280.00,217.56,54,96,1845,6800,P2,Not Active,Not Active,Not Active
+32.575972,decode,1,280.00,227.67,51,96,1905,6800,P2,Not Active,Not Active,Not Active
+33.085959,decode,0,280.00,223.47,54,96,1845,6800,P2,Not Active,Not Active,Not Active
+33.097399,decode,1,280.00,244.64,51,96,1905,6800,P2,Not Active,Not Active,Not Active
+33.640589,decode,0,280.00,225.35,54,96,1845,6800,P2,Not Active,Not Active,Not Active
+33.650343,decode,1,280.00,246.16,51,96,1905,6800,P2,Not Active,Not Active,Not Active
+34.163547,decode,0,280.00,223.31,54,96,1845,6800,P2,Not Active,Not Active,Not Active
+34.173626,decode,1,280.00,248.29,51,96,1905,6800,P2,Not Active,Not Active,Not Active
+34.685173,decode,0,280.00,228.06,54,96,1845,6800,P2,Not Active,Not Active,Not Active
+34.69504,decode,1,280.00,244.27,51,96,1905,6800,P2,Not Active,Not Active,Not Active
+35.20723,decode,0,280.00,213.38,54,96,1845,6800,P2,Not Active,Not Active,Not Active
+35.220733,decode,1,280.00,242.10,51,96,1905,6800,P2,Not Active,Not Active,Not Active
+35.732031,decode,0,280.00,227.51,55,97,1845,6800,P2,Not Active,Not Active,Not Active
+35.741909,decode,1,280.00,245.83,51,96,1905,6800,P2,Not Active,Not Active,Not Active
+36.253534,decode,0,280.00,212.32,55,97,1845,6800,P2,Not Active,Not Active,Not Active
+36.265701,decode,1,280.00,233.46,51,96,1905,6800,P2,Not Active,Not Active,Not Active
+36.775889,decode,0,280.00,217.57,55,97,1845,6800,P2,Not Active,Not Active,Not Active
+36.786498,decode,1,280.00,231.44,51,97,1905,6800,P2,Not Active,Not Active,Not Active
+37.297987,decode,0,280.00,227.07,55,97,1845,6800,P2,Not Active,Not Active,Not Active
+37.310527,decode,1,280.00,237.07,51,97,1890,6800,P2,Not Active,Not Active,Not Active
+37.820318,decode,0,280.00,225.42,55,97,1845,6800,P2,Not Active,Not Active,Not Active
+37.829821,decode,1,280.00,243.72,51,97,1890,6800,P2,Not Active,Not Active,Not Active
+38.34062,decode,0,280.00,228.06,55,97,1845,6800,P2,Not Active,Not Active,Not Active
+38.350213,decode,1,280.00,242.55,52,97,1890,6800,P2,Not Active,Not Active,Not Active
+38.862845,decode,0,280.00,225.96,55,96,1845,6800,P2,Not Active,Not Active,Not Active
+38.872357,decode,1,280.00,242.46,52,97,1890,6800,P2,Not Active,Not Active,Not Active
+39.384005,decode,0,280.00,235.46,55,96,1845,6800,P2,Not Active,Not Active,Not Active
+39.392846,decode,1,280.00,252.03,52,97,1890,6800,P2,Not Active,Not Active,Not Active
+39.904404,decode,0,280.00,222.69,55,97,1845,6800,P2,Not Active,Not Active,Not Active
+39.91455,decode,1,280.00,242.61,52,97,1890,6800,P2,Not Active,Not Active,Not Active
+40.427178,decode,0,280.00,237.65,56,97,1845,6800,P2,Not Active,Not Active,Not Active
+40.436926,decode,1,280.00,254.25,52,97,1890,6800,P2,Not Active,Not Active,Not Active
+40.948024,decode,0,280.00,230.25,56,97,1845,6800,P2,Not Active,Not Active,Not Active
+40.957182,decode,1,280.00,250.54,52,97,1890,6800,P2,Not Active,Not Active,Not Active
+41.467747,decode,0,280.00,231.99,56,97,1845,6800,P2,Not Active,Not Active,Not Active
+41.481346,decode,1,280.00,249.38,52,97,1890,6800,P2,Not Active,Not Active,Not Active
+41.991845,decode,0,280.00,231.95,56,97,1845,6800,P2,Not Active,Not Active,Not Active
+42.003073,decode,1,280.00,247.93,52,97,1890,6800,P2,Not Active,Not Active,Not Active
+42.514025,decode,0,280.00,231.90,56,97,1845,6800,P2,Not Active,Not Active,Not Active
+42.526543,decode,1,280.00,247.80,52,97,1890,6800,P2,Not Active,Not Active,Not Active
+43.038254,decode,0,280.00,216.07,56,96,1845,6800,P2,Not Active,Not Active,Not Active
+43.048358,decode,1,280.00,240.43,52,97,1890,6800,P2,Not Active,Not Active,Not Active
+43.563146,decode,0,280.00,235.98,56,96,1845,6800,P2,Not Active,Not Active,Not Active
+43.572261,decode,1,280.00,257.35,52,96,1890,6800,P2,Not Active,Not Active,Not Active
+44.083255,decode,0,280.00,236.74,56,96,1845,6800,P2,Not Active,Not Active,Not Active
+44.093583,decode,1,280.00,250.89,52,96,1890,6800,P2,Not Active,Not Active,Not Active
+44.604917,decode,0,280.00,228.61,56,97,1845,6800,P2,Not Active,Not Active,Not Active
+44.61833,decode,1,280.00,246.71,52,97,1890,6800,P2,Not Active,Not Active,Not Active
+45.130144,decode,0,280.00,223.12,56,97,1845,6800,P2,Not Active,Not Active,Not Active
+45.140455,decode,1,280.00,243.22,52,97,1890,6800,P2,Not Active,Not Active,Not Active
+45.65189,decode,0,280.00,218.27,56,96,1845,6800,P2,Not Active,Not Active,Not Active
+45.664676,decode,1,280.00,243.67,52,97,1890,6800,P2,Not Active,Not Active,Not Active
+46.174601,decode,0,280.00,225.04,56,96,1845,6800,P2,Not Active,Not Active,Not Active
+46.187483,decode,1,280.00,243.35,52,97,1890,6800,P2,Not Active,Not Active,Not Active
+46.697956,decode,0,280.00,232.17,57,96,1845,6800,P2,Not Active,Not Active,Not Active
+46.711141,decode,1,280.00,249.19,53,96,1890,6800,P2,Not Active,Not Active,Not Active
+47.220723,decode,0,280.00,225.40,57,96,1845,6800,P2,Not Active,Not Active,Not Active
+47.231986,decode,1,280.00,244.11,53,96,1890,6800,P2,Not Active,Not Active,Not Active
+47.742681,decode,0,280.00,230.40,57,97,1845,6800,P2,Not Active,Not Active,Not Active
+47.754495,decode,1,280.00,247.05,53,96,1890,6800,P2,Not Active,Not Active,Not Active
+48.263983,decode,0,280.00,229.65,57,97,1845,6800,P2,Not Active,Not Active,Not Active
+48.273806,decode,1,280.00,245.11,53,96,1890,6800,P2,Not Active,Not Active,Not Active
+48.784485,decode,0,280.00,227.88,57,96,1845,6800,P2,Not Active,Not Active,Not Active
+48.794133,decode,1,280.00,243.64,53,97,1890,6800,P2,Not Active,Not Active,Not Active
+49.305532,decode,0,280.00,235.04,57,96,1845,6800,P2,Not Active,Not Active,Not Active
+49.315747,decode,1,280.00,252.13,53,97,1890,6800,P2,Not Active,Not Active,Not Active
+49.826148,decode,0,280.00,227.21,57,96,1845,6800,P2,Not Active,Not Active,Not Active
+49.836288,decode,1,280.00,243.05,53,96,1890,6800,P2,Not Active,Not Active,Not Active
+50.348037,decode,0,280.00,227.44,57,96,1845,6800,P2,Not Active,Not Active,Not Active
+50.356534,decode,1,280.00,243.03,53,96,1890,6800,P2,Not Active,Not Active,Not Active
+50.86793,decode,0,280.00,230.32,57,96,1845,6800,P2,Not Active,Not Active,Not Active
+50.879255,decode,1,280.00,246.88,53,97,1890,6800,P2,Not Active,Not Active,Not Active
+51.390411,decode,0,280.00,231.96,57,96,1845,6800,P2,Not Active,Not Active,Not Active
+51.399937,decode,1,280.00,248.10,53,97,1890,6800,P2,Not Active,Not Active,Not Active
+51.911595,decode,0,280.00,227.90,57,96,1845,6800,P2,Not Active,Not Active,Not Active
+51.924295,decode,1,280.00,243.65,53,97,1890,6800,P2,Not Active,Not Active,Not Active
+52.435438,decode,0,280.00,227.04,57,96,1845,6800,P2,Not Active,Not Active,Not Active
+52.446338,decode,1,280.00,242.96,53,96,1890,6800,P2,Not Active,Not Active,Not Active
+52.957473,decode,0,280.00,229.39,57,96,1845,6800,P2,Not Active,Not Active,Not Active
+52.970876,decode,1,280.00,245.07,53,96,1890,6800,P2,Not Active,Not Active,Not Active
+53.483689,decode,0,280.00,231.59,58,96,1845,6800,P2,Not Active,Not Active,Not Active
+53.497935,decode,1,280.00,247.33,53,96,1890,6800,P2,Not Active,Not Active,Not Active
+54.007978,decode,0,280.00,231.22,58,96,1845,6800,P2,Not Active,Not Active,Not Active
+54.018226,decode,1,280.00,246.42,53,96,1890,6800,P2,Not Active,Not Active,Not Active
+54.528967,decode,0,280.00,231.13,58,96,1845,6800,P2,Not Active,Not Active,Not Active
+54.538045,decode,1,280.00,245.76,53,96,1890,6800,P2,Not Active,Not Active,Not Active
+55.049031,decode,0,280.00,226.52,58,96,1845,6800,P2,Not Active,Not Active,Not Active
+55.061935,decode,1,280.00,241.66,53,96,1890,6800,P2,Not Active,Not Active,Not Active
+55.572456,decode,0,280.00,230.75,58,96,1845,6800,P2,Not Active,Not Active,Not Active
+55.585353,decode,1,280.00,244.64,53,96,1890,6800,P2,Active,Not Active,Not Active
+56.095411,decode,0,280.00,230.75,58,96,1845,6800,P2,Not Active,Not Active,Not Active
+56.108958,decode,1,280.00,247.49,53,96,1890,6800,P2,Not Active,Not Active,Not Active
+56.619637,decode,0,280.00,230.73,58,96,1845,6800,P2,Not Active,Not Active,Not Active
+56.632279,decode,1,280.00,246.85,53,96,1890,6800,P2,Not Active,Not Active,Not Active

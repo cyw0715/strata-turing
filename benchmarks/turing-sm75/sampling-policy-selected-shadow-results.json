@@ -1,0 +1,248 @@
+{
+  "trial": "trial-20261126-111303",
+  "binary_sha256": "7fc367e26f9f04d6c61217e9fa682d9c0dbfabc9a396bd5025c2a8053fd580ae",
+  "passed": true,
+  "flags": {
+    "FNX_DENSE_TUNED": "1",
+    "FNX_ATTN_WARPS": "1",
+    "FNX_HC_MMA": "1",
+    "FNX_HC_MMA_CHECK": "1",
+    "FNX_CACHE_FAST": "1",
+    "FNX_ATTN_MMA": "1",
+    "FNX_ATTN_MMA_CHECK": "1",
+    "FNX_TOPK_PARALLEL": "1",
+    "FNX_TOPK_PARALLEL_CHECK": "1",
+    "FNX_GU_SUBWARP": "1",
+    "FNX_GU_SUBWARP_CHECK": "1",
+    "FNX_GU_PAIR_EXACT": "1",
+    "FNX_DRAFT_CALIBRATE": "0",
+    "FNX_TOPK_GRAPH": "0",
+    "FNX_TOPK_GRAPH_CHECK": "0",
+    "FNX_DRAFT_COST_ROW_MS": "2.0",
+    "FNX_DRAFT_Q_POWER": "0.5"
+  },
+  "checks": [
+    {
+      "device": 0,
+      "calls": 1632,
+      "failures": 0,
+      "types": 6750208,
+      "gu_relative": 0.0,
+      "down_relative": 0.0,
+      "absolute": 0.0
+    },
+    {
+      "device": 1,
+      "calls": 1632,
+      "failures": 0,
+      "types": 6750208,
+      "gu_relative": 0.0,
+      "down_relative": 0.0,
+      "absolute": 0.0
+    },
+    {
+      "device": 0,
+      "calls": 9168,
+      "failures": 0,
+      "types": 6750208,
+      "gu_relative": 0.0,
+      "down_relative": 0.0,
+      "absolute": 0.0
+    },
+    {
+      "device": 1,
+      "calls": 9168,
+      "failures": 0,
+      "types": 6750208,
+      "gu_relative": 0.0,
+      "down_relative": 0.0,
+      "absolute": 0.0
+    },
+    {
+      "device": 0,
+      "calls": 9264,
+      "failures": 0,
+      "types": 6750208,
+      "gu_relative": 0.0,
+      "down_relative": 0.0,
+      "absolute": 0.0
+    },
+    {
+      "device": 1,
+      "calls": 9264,
+      "failures": 0,
+      "types": 6750208,
+      "gu_relative": 0.0,
+      "down_relative": 0.0,
+      "absolute": 0.0
+    },
+    {
+      "device": 0,
+      "calls": 12288,
+      "failures": 0,
+      "types": 6750208,
+      "gu_relative": 0.0,
+      "down_relative": 0.0,
+      "absolute": 0.0
+    },
+    {
+      "device": 1,
+      "calls": 12288,
+      "failures": 0,
+      "types": 6750208,
+      "gu_relative": 0.0,
+      "down_relative": 0.0,
+      "absolute": 0.0
+    },
+    {
+      "device": 0,
+      "calls": 12384,
+      "failures": 0,
+      "types": 6750208,
+      "gu_relative": 0.0,
+      "down_relative": 0.0,
+      "absolute": 0.0
+    },
+    {
+      "device": 1,
+      "calls": 12384,
+      "failures": 0,
+      "types": 6750208,
+      "gu_relative": 0.0,
+      "down_relative": 0.0,
+      "absolute": 0.0
+    },
+    {
+      "device": 0,
+      "calls": 34752,
+      "failures": 0,
+      "types": 6750208,
+      "gu_relative": 0.0,
+      "down_relative": 0.0,
+      "absolute": 0.0
+    },
+    {
+      "device": 1,
+      "calls": 34752,
+      "failures": 0,
+      "types": 6750208,
+      "gu_relative": 0.0,
+      "down_relative": 0.0,
+      "absolute": 0.0
+    }
+  ],
+  "topk_checks": [
+    {
+      "device": 0,
+      "calls": 0,
+      "failures": 0
+    },
+    {
+      "device": 1,
+      "calls": 0,
+      "failures": 0
+    },
+    {
+      "device": 0,
+      "calls": 354,
+      "failures": 0
+    },
+    {
+      "device": 1,
+      "calls": 354,
+      "failures": 0
+    },
+    {
+      "device": 0,
+      "calls": 354,
+      "failures": 0
+    },
+    {
+      "device": 1,
+      "calls": 354,
+      "failures": 0
+    },
+    {
+      "device": 0,
+      "calls": 560,
+      "failures": 0
+    },
+    {
+      "device": 1,
+      "calls": 560,
+      "failures": 0
+    },
+    {
+      "device": 0,
+      "calls": 560,
+      "failures": 0
+    },
+    {
+      "device": 1,
+      "calls": 560,
+      "failures": 0
+    },
+    {
+      "device": 0,
+      "calls": 2043,
+      "failures": 0
+    },
+    {
+      "device": 1,
+      "calls": 2043,
+      "failures": 0
+    }
+  ],
+  "runtime_reports": [
+    "fnx: HC MMA shadow: dev=0 calls=688 failures=0 relL2=6.668521e-08 maxabs=3.8146973e-06 qrelL2=0.00030529519",
+    "fnx: HC MMA shadow: dev=1 calls=688 failures=0 relL2=6.668521e-08 maxabs=3.8146973e-06 qrelL2=0.00030529519",
+    "fnx: attention MMA shadow: dev=0 heads=82800 failures=0 relative=0.00038855057 lognorm=0.00036621094",
+    "fnx: attention MMA shadow: dev=1 heads=82800 failures=0 relative=0.00031109137 lognorm=0.00036621094",
+    "fnx: GU exact pairs shadow: dev=0 calls=1632 failures=0 types=6750208 GUrel=0 DNrel=0 maxabs=0",
+    "fnx: GU exact pairs shadow: dev=1 calls=1632 failures=0 types=6750208 GUrel=0 DNrel=0 maxabs=0",
+    "fnx: TopK exact shadow: dev=0 calls=0 failures=0",
+    "fnx: TopK exact shadow: dev=1 calls=0 failures=0",
+    "fnx: HC MMA shadow: dev=0 calls=5080 failures=0 relL2=6.668521e-08 maxabs=7.6293945e-06 qrelL2=0.00032397461",
+    "fnx: HC MMA shadow: dev=1 calls=5080 failures=0 relL2=6.668521e-08 maxabs=7.6293945e-06 qrelL2=0.00032397461",
+    "fnx: attention MMA shadow: dev=0 heads=194448 failures=0 relative=0.00039249606 lognorm=0.00048828125",
+    "fnx: attention MMA shadow: dev=1 heads=194448 failures=0 relative=0.00031109137 lognorm=0.00067138672",
+    "fnx: GU exact pairs shadow: dev=0 calls=9168 failures=0 types=6750208 GUrel=0 DNrel=0 maxabs=0",
+    "fnx: GU exact pairs shadow: dev=1 calls=9168 failures=0 types=6750208 GUrel=0 DNrel=0 maxabs=0",
+    "fnx: TopK exact shadow: dev=0 calls=354 failures=0",
+    "fnx: TopK exact shadow: dev=1 calls=354 failures=0",
+    "fnx: HC MMA shadow: dev=0 calls=5177 failures=0 relL2=6.668521e-08 maxabs=7.6293945e-06 qrelL2=0.00032397461",
+    "fnx: HC MMA shadow: dev=1 calls=5177 failures=0 relL2=6.668521e-08 maxabs=7.6293945e-06 qrelL2=0.00032397461",
+    "fnx: attention MMA shadow: dev=0 heads=195648 failures=0 relative=0.00039249606 lognorm=0.00048828125",
+    "fnx: attention MMA shadow: dev=1 heads=195648 failures=0 relative=0.00031109137 lognorm=0.00067138672",
+    "fnx: GU exact pairs shadow: dev=0 calls=9264 failures=0 types=6750208 GUrel=0 DNrel=0 maxabs=0",
+    "fnx: GU exact pairs shadow: dev=1 calls=9264 failures=0 types=6750208 GUrel=0 DNrel=0 maxabs=0",
+    "fnx: TopK exact shadow: dev=0 calls=354 failures=0",
+    "fnx: TopK exact shadow: dev=1 calls=354 failures=0",
+    "fnx: HC MMA shadow: dev=0 calls=10769 failures=0 relL2=6.668521e-08 maxabs=7.6293945e-06 qrelL2=0.00059198972",
+    "fnx: HC MMA shadow: dev=1 calls=10769 failures=0 relL2=6.668521e-08 maxabs=7.6293945e-06 qrelL2=0.00059198972",
+    "fnx: attention MMA shadow: dev=0 heads=259944 failures=0 relative=0.00039249606 lognorm=0.00048828125",
+    "fnx: attention MMA shadow: dev=1 heads=259944 failures=0 relative=0.00031109137 lognorm=0.00067138672",
+    "fnx: GU exact pairs shadow: dev=0 calls=12288 failures=0 types=6750208 GUrel=0 DNrel=0 maxabs=0",
+    "fnx: GU exact pairs shadow: dev=1 calls=12288 failures=0 types=6750208 GUrel=0 DNrel=0 maxabs=0",
+    "fnx: TopK exact shadow: dev=0 calls=560 failures=0",
+    "fnx: TopK exact shadow: dev=1 calls=560 failures=0",
+    "fnx: HC MMA shadow: dev=0 calls=10866 failures=0 relL2=6.668521e-08 maxabs=7.6293945e-06 qrelL2=0.00059198972",
+    "fnx: HC MMA shadow: dev=1 calls=10866 failures=0 relL2=6.668521e-08 maxabs=7.6293945e-06 qrelL2=0.00059198972",
+    "fnx: attention MMA shadow: dev=0 heads=261144 failures=0 relative=0.00039249606 lognorm=0.00048828125",
+    "fnx: attention MMA shadow: dev=1 heads=261144 failures=0 relative=0.00031109137 lognorm=0.00067138672",
+    "fnx: GU exact pairs shadow: dev=0 calls=12384 failures=0 types=6750208 GUrel=0 DNrel=0 maxabs=0",
+    "fnx: GU exact pairs shadow: dev=1 calls=12384 failures=0 types=6750208 GUrel=0 DNrel=0 maxabs=0",
+    "fnx: TopK exact shadow: dev=0 calls=560 failures=0",
+    "fnx: TopK exact shadow: dev=1 calls=560 failures=0",
+    "fnx: HC MMA shadow: dev=0 calls=55210 failures=0 relL2=6.6947777e-08 maxabs=1.5258789e-05 qrelL2=0.00064878067",
+    "fnx: HC MMA shadow: dev=1 calls=55210 failures=0 relL2=6.6947777e-08 maxabs=1.5258789e-05 qrelL2=0.00064878067",
+    "fnx: attention MMA shadow: dev=0 heads=734664 failures=0 relative=0.00041182013 lognorm=0.00054931641",
+    "fnx: attention MMA shadow: dev=1 heads=734664 failures=0 relative=0.00031109137 lognorm=0.00067138672",
+    "fnx: GU exact pairs shadow: dev=0 calls=34752 failures=0 types=6750208 GUrel=0 DNrel=0 maxabs=0",
+    "fnx: GU exact pairs shadow: dev=1 calls=34752 failures=0 types=6750208 GUrel=0 DNrel=0 maxabs=0",
+    "fnx: TopK exact shadow: dev=0 calls=2043 failures=0",
+    "fnx: TopK exact shadow: dev=1 calls=2043 failures=0"
+  ],
+  "weight_precision_changed": false,
+  "performance_evidence": false
+}
